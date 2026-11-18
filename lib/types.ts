@@ -190,4 +190,13 @@ export interface Settings {
   startDate: string;
   font: string;
   books?: number[];
+  /** per book id: where you stopped reading and your bookmarks */
+  reading?: Record<string, ReadingState>;
+}
+
+export interface ReadingState {
+  /** journal page id ("d-2026-11-15") or library location ("c12.40.3") */
+  last?: string;
+  marks?: string[];
+  at?: string;
 }

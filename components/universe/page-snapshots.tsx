@@ -10,14 +10,18 @@ import { bookPages, type PageRef } from '@/lib/book';
 import { useSettings } from '@/lib/hooks';
 import { longDate, monthName, shortDate } from '@/lib/dates';
 import type { DayData, MonthData, Settings, WeekData, YearData } from '@/lib/types';
-import { snapFailed, snapshots, useU, type SnapRequest } from '@/lib/universe';
+import { JOURNAL_DIMS, snapFailed, snapshots, useU, type SnapRequest } from '@/lib/universe';
 import { DailyFront } from '@/components/book/daily-front';
 import { MonthFront, WeekFront, YearFront } from '@/components/book/review-fronts';
 import { Paper } from '@/components/book/paper';
-import { PAGE_H, PAGE_W } from './textures';
 
-const CAPTURE_W = 860;
-const MAX_SNAPSHOTS = 40;
+export const CAPTURE_W = 860;
+/** The paper is laid out at the 3D page's proportions, so it fills the page edge to edge. */
+export const CAPTURE_H = Math.round((CAPTURE_W * JOURNAL_DIMS.H) / JOURNAL_DIMS.W);
+/** Photos are taken at 2× so text stays sharp on the 3D page. */
+const PIXEL_RATIO = 2;
+/** Each 2× photo is ~16 MB: keep the spread and its neighbours. */
+const MAX_SNAPSHOTS = 12;
 
 export function Snapshotter() {
   const queue = useU((s) => s.snapQueue);
@@ -26,7 +30,12 @@ export function Snapshotter() {
   const head = queue[0];
   if (!head || !settings) return null;
   return (
-    <div aria-hidden inert style={{ position: 'fixed', left: -20000, top: 0, width: CAPTURE_W, pointerEvents: 'none' }}>
+    <div
+      aria-hidden
+      inert
+      className="snap-root"
+      style={{ position: 'fixed', left: -20000, top: 0, width: CAPTURE_W, pointerEvents: 'none', ['--snap-h' as string]: `${CAPTURE_H}px` }}
+    >
       <SnapFace key={head.key} req={head} settings={settings} epoch={epoch} />
     </div>
   );
@@ -36,7 +45,7 @@ const noop = () => undefined;
 const frame = () => new Promise<void>((r) => requestAnimationFrame(() => r()));
 const sleep = (ms: number) => new Promise<void>((r) => setTimeout(r, ms));
 
-function queryFor(ref: PageRef): { key: unknown[]; url: string } {
+export function queryFor(ref: PageRef): { key: unknown[]; url: string } {
   if (ref.kind === 'day') return { key: ['day', ref.date], url: `/today?date=${ref.date}` };
   if (ref.kind === 'week') return { key: ['week', ref.monday], url: `/reviews/week/${ref.monday}` };
   if (ref.kind === 'month') return { key: ['month', ref.month], url: `/reviews/month/${ref.month}` };
@@ -61,7 +70,7 @@ function SnapFace({ req, settings, epoch }: { req: SnapRequest; settings: Settin
         await sleep(150);
         if (cancelled || !node.current) return;
         const css = await fontEmbedCss(settings.font);
-        const shot = await toCanvas(node.current, { pixelRatio: 1, fontEmbedCSS: css, cacheBust: false, width: CAPTURE_W });
+        const shot = await toCanvas(node.current, { pixelRatio: PIXEL_RATIO, fontEmbedCSS: css, cacheBust: false, width: CAPTURE_W });
         if (!cancelled && useU.getState().snapEpoch === epoch) {
           snapshots.set(req.key, fitToPage(shot));
           while (snapshots.size > MAX_SNAPSHOTS) snapshots.delete(snapshots.keys().next().value as string);
@@ -86,7 +95,7 @@ function SnapFace({ req, settings, epoch }: { req: SnapRequest; settings: Settin
   return <div ref={node}>{renderFace(ref, req.side, q.data, settings)}</div>;
 }
 
-function renderFace(ref: PageRef, side: 'front' | 'back', data: unknown, settings: Settings) {
+export function renderFace(ref: PageRef, side: 'front' | 'back', data: unknown, settings: Settings) {
   if (ref.kind === 'day') {
     const d = data as DayData;
     return side === 'front' ? (
@@ -143,18 +152,21 @@ function sanitize(html: string): string {
   return doc.body.firstElementChild?.innerHTML ?? '';
 }
 
-/** Places the page photo on a canvas with the 3D page's proportions (top-aligned, paper-coloured margins). */
+/**
+ * Places the page photo on a canvas with the 3D page's exact proportions. The paper is already
+ * laid out at that size; a page with more content than fits is scaled down and centred.
+ */
 function fitToPage(shot: HTMLCanvasElement): HTMLCanvasElement {
   const c = document.createElement('canvas');
-  c.width = PAGE_W;
-  c.height = PAGE_H;
+  c.width = CAPTURE_W * PIXEL_RATIO;
+  c.height = CAPTURE_H * PIXEL_RATIO;
   const ctx = c.getContext('2d')!;
-  ctx.fillStyle = '#fffdf7';
+  ctx.fillStyle = getComputedStyle(document.documentElement).getPropertyValue('--paper').trim() || '#f7f2e9';
   ctx.fillRect(0, 0, c.width, c.height);
   const scale = Math.min(c.width / shot.width, c.height / shot.height);
   const w = shot.width * scale;
   const h = shot.height * scale;
-  ctx.drawImage(shot, (c.width - w) / 2, 0, w, h);
+  ctx.drawImage(shot, (c.width - w) / 2, (c.height - h) / 2, w, h);
   return c;
 }
 

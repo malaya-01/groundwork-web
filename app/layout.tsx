@@ -21,6 +21,12 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
         <link rel="stylesheet" href={GOOGLE_FONTS_URL} />
         {/* eslint-disable-next-line @next/next/no-page-custom-font */}
         <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Orbitron:wght@400..900&family=Rajdhani:wght@400;500;600;700&display=swap" />
+        {/* Interface (Inter) and display (Cormorant Garamond) faces for the universe */}
+        {/* eslint-disable-next-line @next/next/no-page-custom-font */}
+        <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@300..700&family=Cormorant+Garamond:ital,wght@0,400..700;1,400..700&display=swap" />
+        {/* Book face for library books (typeset onto the 3D pages) */}
+        {/* eslint-disable-next-line @next/next/no-page-custom-font */}
+        <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Literata:ital,opsz,wght@0,7..72,400;0,7..72,600;1,7..72,400;1,7..72,600&display=swap" />
       </head>
       <body className="antialiased">
         <Providers>{children}</Providers>

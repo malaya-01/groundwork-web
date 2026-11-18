@@ -3,6 +3,7 @@
 import { useEffect, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { Download, Eye, EyeOff, LogOut } from 'lucide-react';
+import { PasswordInput } from '@/components/password-input';
 import { ApiError, api, post } from '@/lib/api';
 import { useSettings, useUpdateSettings } from '@/lib/hooks';
 import { HAND_FONTS } from '@/lib/fonts';
@@ -28,6 +29,7 @@ export default function SettingsPage() {
 
   const card = 'rounded-2xl border border-white/10 bg-[#1f2126] p-5';
   const input = 'rounded-lg border border-white/10 bg-[#24262c] px-3 py-2 text-sm outline-none focus:border-white/40';
+  const darkEye = 'text-zinc-400 hover:text-white';
 
   async function exportAll() {
     const json = await api<unknown>('/export');
@@ -113,8 +115,8 @@ export default function SettingsPage() {
             }
           }}
         >
-          <input type="password" placeholder="Current" className={input} value={pw.current} onChange={(e) => setPw({ ...pw, current: e.target.value })} autoComplete="current-password" />
-          <input type="password" placeholder="New (8+ chars)" className={input} value={pw.next} onChange={(e) => setPw({ ...pw, next: e.target.value })} minLength={8} autoComplete="new-password" />
+          <PasswordInput wrapperClassName="relative flex items-center" toggleClassName={darkEye} placeholder="Current" className={input} value={pw.current} onChange={(e) => setPw({ ...pw, current: e.target.value })} required autoComplete="current-password" />
+          <PasswordInput wrapperClassName="relative flex items-center" toggleClassName={darkEye} placeholder="New (8+ chars)" className={input} value={pw.next} onChange={(e) => setPw({ ...pw, next: e.target.value })} required minLength={8} autoComplete="new-password" />
           <button className="rounded-lg bg-[#2e3138] px-4 py-2 text-sm hover:bg-[#383c45]">Change</button>
         </form>
       </section>
