@@ -1,15 +1,25 @@
 'use client';
 
+import { useEffect, useRef, useState } from 'react';
 import clsx from 'clsx';
 import type { SaveStatus } from '@/lib/hooks';
+import { usePage } from './page-context';
 
+/** Page size in CSS px. A sheet never grows: what doesn't fit on the page can't be written. */
+export const PAGE_W = 860;
+export const PAGE_H = 1147; // 3 : 4, the same proportions as the 3D journal pages
+
+/**
+ * One side of a sheet of paper. Fixed size, like a real notebook page: the binding is on the
+ * left, the page number in the outer (bottom-right) corner.
+ */
 export function Paper({
   side = 'front',
   kicker,
   title,
   meta,
-  footLeft,
-  footRight,
+  pageNo,
+  status,
   children,
   className,
 }: {
@@ -17,13 +27,17 @@ export function Paper({
   kicker: string;
   title: React.ReactNode;
   meta?: React.ReactNode;
-  footLeft?: React.ReactNode;
-  footRight?: React.ReactNode;
+  pageNo?: number;
+  /** save status / small note, shown at the foot of the page */
+  status?: React.ReactNode;
   children: React.ReactNode;
   className?: string;
 }) {
+  const page = usePage();
+  const el = useRef<HTMLElement>(null);
+  const over = useOverfull(el);
   return (
-    <article className={clsx('paper', side === 'back' && 'back', className)}>
+    <article ref={el} className={clsx('paper', side === 'back' && 'notes', className)}>
       <header className="p-head">
         <div className="min-w-0">
           <div className="p-kicker">{kicker}</div>
@@ -33,11 +47,77 @@ export function Paper({
       </header>
       {children}
       <footer className="p-foot">
-        <span>{footLeft ?? 'Groundwork'}</span>
-        <span className="hidden sm:inline">Never miss twice</span>
-        <span>{footRight}</span>
+        <span className={clsx('p-status', over && 'overfull')}>{over ? 'Over-full: rub something out' : status}</span>
+        <span>Never miss twice</span>
+        <span className="p-num">{pageNo ?? page?.pageNo ?? ''}</span>
       </footer>
     </article>
+  );
+}
+
+/**
+ * True when what's on the page runs past its foot (an old page with more rows than are printed,
+ * say). It is never cut off silently: the footer says so.
+ */
+function useOverfull(ref: React.RefObject<HTMLElement | null>) {
+  const [over, setOver] = useState(false);
+  useEffect(() => {
+    const el = ref.current;
+    if (!el) return;
+    const check = () => setOver(el.scrollHeight > el.clientHeight + 2);
+    check();
+    const ro = new ResizeObserver(check);
+    for (const c of el.children) ro.observe(c);
+    const mo = new MutationObserver(check);
+    mo.observe(el, { childList: true, subtree: true });
+    return () => {
+      ro.disconnect();
+      mo.disconnect();
+    };
+  }, [ref]);
+  return over;
+}
+
+/**
+ * Paper doesn't stretch: true if the text still fits inside the field
+ * (one line for an input, its ruled lines for a text area).
+ */
+export function fits(el: HTMLInputElement | HTMLTextAreaElement): boolean {
+  if (el instanceof HTMLTextAreaElement) return el.scrollHeight <= el.clientHeight + 1;
+  return el.scrollWidth <= el.clientWidth;
+}
+
+/**
+ * Accept a change only if it fits, or if it makes the text shorter (so you can always rub out).
+ * A refused change tells the notebook, which says the space is full.
+ */
+function useAccept() {
+  const page = usePage();
+  return (el: HTMLInputElement | HTMLTextAreaElement, prev: string, next: string) => {
+    if (next.length <= prev.length || fits(el)) return true;
+    page?.onFull();
+    return false;
+  };
+}
+
+/** A handwritten line in a table cell or row: stops taking letters when the line is full. */
+export function HandInput({
+  value,
+  onChange,
+  className,
+  ...rest
+}: Omit<React.InputHTMLAttributes<HTMLInputElement>, 'value' | 'onChange'> & { value: string; onChange: (v: string) => void }) {
+  const accept = useAccept();
+  return (
+    <input
+      {...rest}
+      className={clsx('hand-input', className)}
+      data-empty={value === '' ? '' : undefined}
+      value={value}
+      onChange={(e) => {
+        if (rest.type === 'time' || accept(e.currentTarget, value, e.currentTarget.value)) onChange(e.currentTarget.value);
+      }}
+    />
   );
 }
 
@@ -78,20 +158,19 @@ export function Line({
   return (
     <label className={clsx('flex min-w-0 items-end gap-2', grow && 'min-w-[min(100%,240px)] flex-1', className)}>
       {label && <span className="p-label pb-1">{label}</span>}
-      <input
-        className="hand-input"
+      <HandInput
         style={width ? { width, flex: 'none' } : undefined}
         type={type}
         inputMode={inputMode}
-        value={value ?? ''}
+        value={value == null ? '' : String(value)}
         placeholder={placeholder}
-        onChange={(e) => onChange(e.target.value)}
+        onChange={onChange}
       />
     </label>
   );
 }
 
-/** Lined writing area that grows with what you write. */
+/** A few ruled lines to write on. The lines are printed: when they're full, the space is full. */
 export function Area({
   label,
   value,
@@ -105,15 +184,19 @@ export function Area({
   rows?: number;
   placeholder?: string;
 }) {
+  const accept = useAccept();
   return (
     <label className="flex flex-col gap-0.5">
       {label && <span className="p-label">{label}</span>}
       <textarea
         className="hand-area"
-        rows={Math.max(rows, (value.match(/\n/g)?.length ?? 0) + 1)}
+        rows={rows}
+        style={{ height: `calc(${rows} * var(--lh))` }}
         value={value}
         placeholder={placeholder}
-        onChange={(e) => onChange(e.target.value)}
+        onChange={(e) => {
+          if (accept(e.currentTarget, value, e.currentTarget.value)) onChange(e.currentTarget.value);
+        }}
       />
     </label>
   );

@@ -1,18 +1,12 @@
 'use client';
 
-// The readable layer of an open book. The 3D book stays the object; the words on its open pages
+// The readable layer of an open library book (journals open as the real notebook instead). The 3D book stays the object; the words on its open pages
 // are drawn here as real vector text / DOM, positioned every frame exactly over the 3D pages
 // (see ReadingProjector in scene.tsx). So text is sharp at every zoom and never distorted.
 // Pointer events pass through to the 3D pages (click to turn, drag to turn, double-click…).
 import { memo } from 'react';
-import { useQuery } from '@tanstack/react-query';
-import { api } from '@/lib/api';
-import { bookPages } from '@/lib/book';
-import { useSettings } from '@/lib/hooks';
 import { LIB_PAGE, ornamentPoints, PAPER, type Typeset } from '@/lib/library';
-import type { Settings } from '@/lib/types';
 import { focusedBook, readingEls, typesets, useU, type UBook } from '@/lib/universe';
-import { CAPTURE_H, CAPTURE_W, queryFor, renderFace } from './page-snapshots';
 
 export function ReadingSurface() {
   const mode = useU((s) => s.mode);
@@ -20,7 +14,7 @@ export function ReadingSurface() {
   const focus = useU((s) => s.focus);
   useU((s) => s.typesetVersion);
   const book = focusedBook();
-  if (mode !== 'open' || !book || !focus) return null;
+  if (mode !== 'open' || !book || !focus || book.kind !== 'library') return null;
   return (
     <div
       ref={(el) => void (readingEls.root = el)}
@@ -39,17 +33,11 @@ export function ReadingSurface() {
 }
 
 function Face({ book, sheet, side }: { book: UBook; sheet: number; side: 'front' | 'back' }) {
-  if (book.kind === 'library') {
-    const ts = typesets.get(book.id);
-    const n = ts ? Math.ceil(ts.pages.length / 2) : 0;
-    const p = side === 'front' ? 2 * sheet : 2 * sheet + 1;
-    if (!ts || sheet < 0 || sheet >= n || p >= ts.pages.length) return <Endpaper />;
-    return <LibPage ts={ts} index={p} />;
-  }
-  const pages = bookPages(book.year!);
-  const ref = pages[sheet];
-  if (!ref) return <Endpaper />;
-  return <JournalFace pageRef={ref} side={side} />;
+  const ts = typesets.get(book.id);
+  const n = ts ? Math.ceil(ts.pages.length / 2) : 0;
+  const p = side === 'front' ? 2 * sheet : 2 * sheet + 1;
+  if (!ts || sheet < 0 || sheet >= n || p >= ts.pages.length) return <Endpaper />;
+  return <LibPage ts={ts} index={p} />;
 }
 
 function Endpaper() {
@@ -89,16 +77,3 @@ const LibPage = memo(function LibPage({ ts, index }: { ts: Typeset; index: numbe
     </div>
   );
 });
-
-/** A journal page: the real page component, read-only (writing happens in write mode). */
-function JournalFace({ pageRef, side }: { pageRef: ReturnType<typeof bookPages>[number]; side: 'front' | 'back' }) {
-  const { data: settings } = useSettings();
-  const { key, url } = queryFor(pageRef);
-  const q = useQuery({ queryKey: key, queryFn: () => api<unknown>(url) });
-  if (!q.data || !settings) return <Endpaper />;
-  return (
-    <div className="rs-scale snap-root" style={{ width: CAPTURE_W, height: CAPTURE_H, ['--snap-h' as string]: `${CAPTURE_H}px` }} inert>
-      {renderFace(pageRef, side, q.data, settings as Settings)}
-    </div>
-  );
-}

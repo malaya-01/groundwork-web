@@ -27,7 +27,6 @@ import {
   type Texture,
 } from 'three';
 import { RoundedBoxGeometry } from 'three-stdlib';
-import { bookPages } from '@/lib/book';
 import {
   COVER,
   HERO_Y,
@@ -44,12 +43,9 @@ import {
   orbitAngle,
   orbitPosition,
   readingAnchor,
-  requestSnap,
   setZoom,
   sheetCount,
   sheetForLocation,
-  snapKey,
-  snapshots,
   sortBooks,
   thicknessOf,
   turnPage,
@@ -57,10 +53,9 @@ import {
   useU,
   view,
   type Orbit,
-  type SnapRequest,
   type UBook,
 } from '@/lib/universe';
-import { blankPageTexture, edgeTexture, gutterTexture, lampTexture, libPageTexture, mirror, pageTexture, ribbonTexture, snapTexture, type PageContext } from './textures';
+import { blankPageTexture, edgeTexture, gutterTexture, lampTexture, libPageTexture, mirror, ribbonTexture } from './textures';
 import { backMaps, edgeTone, frontMaps, spineMapsFor, type Maps } from './book-art';
 
 const { C, OVER } = COVER;
@@ -411,98 +406,49 @@ export function Book3D({ book, index, total, orbit }: { book: UBook; index: numb
 
 // ------------------------------------------------------------------ page textures for the open spread
 
-function usePageContext(book: UBook): PageContext | null {
-  const year = book.year ?? 0;
-  const logs = useU((s) => (book.kind === 'journal' && s.logsYear === year ? s.logs : null));
-  const font = useU((s) => s.font);
-  const fontScale = useU((s) => s.fontScale);
-  const fontReady = useU((s) => s.fontReady);
-  const startDate = useU((s) => s.startDate);
-  const codeA = useU((s) => s.codeA);
-  const codeB = useU((s) => s.codeB);
-  const username = useU((s) => s.username);
-  return useMemo(
-    () => (book.kind === 'journal' && logs && fontReady ? { year, sheets: bookPages(year), logs, font, fontScale, startDate, codeA, codeB, username } : null),
-    [book.kind, year, logs, font, fontScale, fontReady, startDate, codeA, codeB, username],
-  );
-}
-
 interface SpreadTex {
   left: Texture;
   right: Texture;
   turnFront: Texture | null;
   turnBack: Texture | null;
-  wanted: SnapRequest[];
 }
 
 /**
- * Textures for the open spread, accounting for a page mid-turn. (While you read face-on, crisp
- * HTML pages cover these; the textures show during turns and in the desk view.)
- * Journals: the photographed 2D page. Library books: the typeset page.
+ * Textures for the open spread, accounting for a page mid-turn. Library books: the typeset
+ * pages (crisp HTML pages cover them while you read face-on). Journals: plain paper, since an
+ * open journal is shown as the real notebook laid over the book.
  */
 function useSpread(book: UBook): SpreadTex | null {
-  const pc = usePageContext(book);
-  const epoch = useU((s) => s.snapEpoch);
-  const version = useU((s) => s.snapVersion);
   const tsVersion = useU((s) => s.typesetVersion);
   const sheet = useU((s) => s.sheet);
   const turn = useU((s) => s.turn);
   const { W, H } = dimsOf(book);
   return useMemo(() => {
     const aspect = W / H;
+    if (book.kind !== 'library') {
+      const paper = blankPageTexture(aspect);
+      return { left: paper, right: paper, turnFront: null, turnBack: null };
+    }
+    const ts = typesets.get(book.id);
+    if (!ts) return null;
     const leftIdx = turn?.dir === -1 ? sheet - 1 : sheet;
     const rightIdx = turn?.dir === 1 ? sheet + 2 : sheet + 1;
     const turnIdx = turn ? (turn.dir === 1 ? sheet + 1 : sheet) : null;
-
-    if (book.kind === 'library') {
-      const ts = typesets.get(book.id);
-      if (!ts) return null;
-      const n = Math.ceil(ts.pages.length / 2);
-      const tex = (side: 'front' | 'back', idx: number) => {
-        const p = side === 'front' ? 2 * idx : 2 * idx + 1;
-        if (idx < 0 || idx >= n || p >= ts.pages.length) return blankPageTexture(aspect, 'endpaper');
-        return libPageTexture(ts, p);
-      };
-      return {
-        left: tex('back', leftIdx),
-        right: tex('front', rightIdx),
-        turnFront: turnIdx !== null ? tex('front', turnIdx) : null,
-        turnBack: turnIdx !== null ? mirror(tex('back', turnIdx)) : null,
-        wanted: [],
-      };
-    }
-
-    if (!pc) return null;
-    const year = book.year!;
-    const n = pc.sheets.length;
+    const n = Math.ceil(ts.pages.length / 2);
     const tex = (side: 'front' | 'back', idx: number) => {
-      if (idx >= 0 && idx < n) {
-        const key = snapKey(year, idx, side, epoch);
-        const shot = snapshots.get(key);
-        if (shot) return snapTexture(key, shot);
-      }
-      return pageTexture(side, idx, pc);
+      const p = side === 'front' ? 2 * idx : 2 * idx + 1;
+      if (idx < 0 || idx >= n || p >= ts.pages.length) return blankPageTexture(aspect, 'endpaper');
+      return libPageTexture(ts, p);
     };
-    const wanted: ['front' | 'back', number][] = [
-      ['front', sheet + 1],
-      ['back', sheet],
-      ['front', sheet + 2],
-      ['back', sheet + 1],
-      ['front', sheet],
-      ['back', sheet - 1],
-    ];
     return {
       left: tex('back', leftIdx),
       right: tex('front', rightIdx),
       turnFront: turnIdx !== null ? tex('front', turnIdx) : null,
       turnBack: turnIdx !== null ? mirror(tex('back', turnIdx)) : null,
-      wanted: wanted
-        .filter(([, i]) => i >= 0 && i < n)
-        .map(([side, i]): SnapRequest => ({ key: snapKey(year, i, side, epoch), year, index: i, side })),
     };
-    // version / tsVersion: re-run when a new photo or typeset arrives
+    // tsVersion: re-run when a typeset arrives
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [book, pc, epoch, version, tsVersion, sheet, turn, W, H]);
+  }, [book, tsVersion, sheet, turn, W, H]);
 }
 
 // ------------------------------------------------------------------ hand-held page turning + pan
@@ -669,13 +615,6 @@ function SpreadRight({ book, geoRef, stacks, T }: { book: UBook; geoRef: GeoRef;
     };
   }, [geo, geoRef, stacks, W, H, T]);
 
-  // journals: queue photos of the real pages, the visible spread first, then its neighbours
-  useEffect(() => {
-    if (!spread) return;
-    spread.wanted.slice(0, 2).reverse().forEach((r) => requestSnap(r, true));
-    spread.wanted.slice(2).forEach((r) => requestSnap(r));
-  }, [spread]);
-
   if (!spread) return null;
   return (
     <>
@@ -774,14 +713,64 @@ function TurningPage({ dir, front, back, W, H, T, stacks }: { dir: 1 | -1; front
 }
 
 // ------------------------------------------------------------------ ribbon bookmarks
-const RIBBONS = ['#9e1b32', '#c9a227', '#1f6f78'];
-const RIBBON_W = 0.032;
-const TAIL = 0.32;
+const RIBBONS = ['#8f1a2c', '#b8902a', '#1d5f68'];
+const RIBBON_W = 0.034;
+const TAIL = 0.34;
+
+/** A ribbon as a strip of cloth along a path (u across, v = 1 at the head, 0 at the swallow-tail). */
+function stripGeometry(points: Vector3[], width: number): BufferGeometry {
+  const n = points.length;
+  const pos = new Float32Array(n * 2 * 3);
+  const uv = new Float32Array(n * 2 * 2);
+  const len = [0];
+  for (let i = 1; i < n; i++) len.push(len[i - 1] + points[i].distanceTo(points[i - 1]));
+  const total = len[n - 1] || 1;
+  for (let i = 0; i < n; i++) {
+    const p = points[i];
+    pos.set([p.x - width / 2, p.y, p.z, p.x + width / 2, p.y, p.z], i * 6);
+    const v = 1 - len[i] / total;
+    uv.set([0, v, 1, v], i * 4);
+  }
+  const idx: number[] = [];
+  for (let i = 0; i < n - 1; i++) {
+    const a = i * 2;
+    idx.push(a, a + 2, a + 1, a + 1, a + 2, a + 3);
+  }
+  const g = new BufferGeometry();
+  g.setAttribute('position', new BufferAttribute(pos, 3));
+  g.setAttribute('uv', new BufferAttribute(uv, 2));
+  g.setIndex(idx);
+  g.computeVertexNormals();
+  return g;
+}
+
+const ribbonMats = new Map<string, MeshPhysicalMaterial>();
+/** Satin: a soft sheen that follows the light across the folds, not a flat card. */
+function ribbonMaterial(color: string) {
+  let m = ribbonMats.get(color);
+  if (!m) {
+    m = new MeshPhysicalMaterial({
+      map: ribbonTexture(color),
+      alphaTest: 0.5,
+      side: DoubleSide,
+      roughness: 0.38,
+      metalness: 0,
+      sheen: 1,
+      sheenRoughness: 0.32,
+      sheenColor: '#ffd9df',
+      clearcoat: 0.25,
+      clearcoatRoughness: 0.35,
+      envMapIntensity: 0.9,
+    });
+    ribbonMats.set(color, m);
+  }
+  return m;
+}
 
 /**
- * Your bookmarks as satin ribbons. On the open spread a ribbon lies across the page near the
- * spine; bookmarks further on (or back) show only a tail hanging below that side of the block;
- * a closed book shows the tails below its foot.
+ * Your bookmarks as satin ribbons. On the open spread a ribbon lies on the page by the gutter,
+ * rolls over the foot of the page block and hangs below it; bookmarks further on (or back) show
+ * only a tail hanging out of that side of the block; a closed book shows the tails below its foot.
  */
 function Ribbons({ book, T, stacks, isOpen }: { book: UBook; T: number; stacks: StacksRef; isOpen: boolean }) {
   const marks = useU((s) => s.reading[book.id]?.marks);
@@ -793,31 +782,50 @@ function Ribbons({ book, T, stacks, isOpen }: { book: UBook; T: number; stacks: 
     // eslint-disable-next-line react-hooks/exhaustive-deps
     [marks, book, tsVersion],
   );
-  if (!sheets.length) return null;
+  const geos = useMemo(() => {
+    const { TL, TR } = stacks.current;
+    return sheets.map((m, i) => {
+      const x = 0.07 + i * 0.05;
+      const pts: Vector3[] = [];
+      if (isOpen && m === sheet) {
+        // lying on the right-hand page, from the head of the spine down to the foot
+        const z = -T + surf(x / W, TR, 1) + 0.0035;
+        for (let k = 0; k <= 16; k++) pts.push(new Vector3(x + 0.006 * Math.sin((k / 16) * Math.PI), H / 2 + 0.01 - (k / 16) * H, z));
+        // rolling over the edge of the block
+        const r = 0.014;
+        for (let k = 1; k <= 6; k++) {
+          const a = (k / 6) * (Math.PI / 2);
+          pts.push(new Vector3(x, -H / 2 - Math.sin(a) * r, z - (1 - Math.cos(a)) * r));
+        }
+        // hanging, swinging back a little under its own weight
+        const y0 = -H / 2 - r;
+        const z0 = z - r;
+        for (let k = 1; k <= 10; k++) {
+          const t = k / 10;
+          pts.push(new Vector3(x + 0.01 * t * t, y0 - t * TAIL, z0 - 0.035 * t * t));
+        }
+      } else {
+        // only the tail shows, coming out between the pages at the foot of the block
+        const onLeft = isOpen && m < sheet;
+        const xs = onLeft ? -x : x;
+        const z = isOpen ? -T + (onLeft ? TL : TR) * 0.5 : -T / 2;
+        for (let k = 0; k <= 12; k++) {
+          const t = k / 12;
+          pts.push(new Vector3(xs + 0.012 * Math.sin(t * 2.2 + i), -H / 2 + 0.03 - t * (TAIL + 0.03), z + 0.03 * Math.sin(t * Math.PI * 0.9) * (i % 2 ? -1 : 1)));
+        }
+      }
+      return stripGeometry(pts, RIBBON_W);
+    });
+    // stacks is read when the spread changes (it follows sheet)
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [sheets, sheet, isOpen, T, W, H]);
+  useEffect(() => () => geos.forEach((g) => g.dispose()), [geos]);
+
   return (
     <>
-      {sheets.map((m, i) => {
-        const x = 0.06 + i * 0.045;
-        const tex = ribbonTexture(RIBBONS[i % RIBBONS.length]);
-        const { TL, TR } = stacks.current;
-        if (isOpen && m === sheet) {
-          const z = -T + surf(x / W, TR, 1) + 0.006;
-          return (
-            <mesh key={i} position={[x, -TAIL / 2, z]} renderOrder={5}>
-              <planeGeometry args={[RIBBON_W, H + TAIL]} />
-              <meshStandardMaterial map={tex} alphaTest={0.5} side={DoubleSide} roughness={0.4} />
-            </mesh>
-          );
-        }
-        const onLeft = isOpen && m < sheet;
-        const z = isOpen ? -T + (onLeft ? TL : TR) * 0.5 : -T / 2;
-        return (
-          <mesh key={i} position={[onLeft ? -x : x, -H / 2 - TAIL / 2 + 0.03, z]}>
-            <planeGeometry args={[RIBBON_W, TAIL]} />
-            <meshStandardMaterial map={tex} alphaTest={0.5} side={DoubleSide} roughness={0.4} />
-          </mesh>
-        );
-      })}
+      {geos.map((g, i) => (
+        <mesh key={i} geometry={g} material={ribbonMaterial(RIBBONS[i % RIBBONS.length])} renderOrder={5} raycast={() => null} />
+      ))}
     </>
   );
 }

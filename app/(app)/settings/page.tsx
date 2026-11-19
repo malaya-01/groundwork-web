@@ -86,8 +86,8 @@ export default function SettingsPage() {
             Second letter
             <input className={`${input} w-20 text-center uppercase`} maxLength={2} value={codeB} onChange={(e) => setCodeB(e.target.value.toUpperCase())} />
           </label>
-          <label className="flex flex-col gap-1 text-xs text-zinc-400">
-            Day 1 of the system
+          <label className="flex flex-col gap-1 text-xs text-zinc-400" title="Pages are dated and page-numbered; this only decides which year your first book is.">
+            Started on (first book&apos;s year)
             <input type="date" className={`${input} [color-scheme:dark]`} value={start} onChange={(e) => setStart(e.target.value)} />
           </label>
           <button

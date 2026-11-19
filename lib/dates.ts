@@ -33,5 +33,17 @@ export const monthName = (ym: string) => {
   return `${MONTHS[m - 1]} ${y}`;
 };
 
-/** Week number counted from the system's start date (Week 1 = the week containing Day 1). */
-export const weekNumber = (startDate: string, monday: string) => Math.floor(daysBetween(mondayOf(startDate), monday) / 7) + 1;
+/** ISO-8601 week of the year (weeks start on Monday; week 1 holds the year's first Thursday). */
+export function isoWeek(s: string): number {
+  const d = parseIso(s);
+  const thursday = new Date(d.getFullYear(), d.getMonth(), d.getDate() + 3 - ((d.getDay() + 6) % 7));
+  const days = Math.round((thursday.getTime() - new Date(thursday.getFullYear(), 0, 1).getTime()) / 86_400_000);
+  return 1 + Math.floor(days / 7);
+}
+
+export const DAY_NAMES = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
+/** "Thursday, 19 November" */
+export const dayTitle = (s: string) => {
+  const d = parseIso(s);
+  return `${DAY_NAMES[d.getDay()]}, ${d.getDate()} ${MONTHS[d.getMonth()]}`;
+};

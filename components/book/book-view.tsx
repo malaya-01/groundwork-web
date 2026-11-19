@@ -1,50 +1,25 @@
 'use client';
 
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import Link from 'next/link';
-import { useRouter } from 'next/navigation';
+import { useRouter, useSearchParams } from 'next/navigation';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { ChevronLeft, ChevronRight, CalendarDays, Menu, RotateCw, X } from 'lucide-react';
 import clsx from 'clsx';
-import { api, put } from '@/lib/api';
+import { api } from '@/lib/api';
 import { useSettings } from '@/lib/hooks';
-import { longDate, monthName, shortDate, todayIso } from '@/lib/dates';
-import { neighbours, parsePageId, todayHref, type PageRef } from '@/lib/book';
-import type { BookToc, DayData, MonthData, Settings, WeekData, YearData } from '@/lib/types';
+import { isoWeek, longDate, monthName, todayIso } from '@/lib/dates';
+import { bookPages, pageId, sheetIndex, todayHref, type PageRef } from '@/lib/book';
+import type { BookToc } from '@/lib/types';
 import { Toc } from './toc';
-import { DailyFront } from './daily-front';
-import { MonthFront, WeekFront, YearFront } from './review-fronts';
-import { NotesBack } from './notes-back';
+import { NotebookStage, useNotebook, type Cursor } from './notebook';
+import { BookmarkList, RibbonSwatch, useBookmarks } from './bookmarks';
 
-export function BookView({ year, pageId }: { year: number; pageId: string }) {
-  const router = useRouter();
-  const qc = useQueryClient();
-  const ref = parsePageId(pageId, year);
-  const { data: settings } = useSettings();
-  const toc = useQuery({ queryKey: ['book', year], queryFn: () => api<BookToc>(`/book/${year}`) });
-  const [side, setSide] = useState<'front' | 'back'>('front');
-  const [drawer, setDrawer] = useState(false);
-  const { prev, next } = neighbours(year, pageId);
+const hrefOf = (year: number, c: Cursor) => `/book/${year}/${pageId(bookPages(year)[c.index])}${c.side === 'back' ? '?side=notes' : ''}`;
 
-  useEffect(() => setSide('front'), [pageId]);
-
-  const onSaved = useCallback(() => {
-    void qc.invalidateQueries({ queryKey: ['book', year] });
-  }, [qc, year]);
-
-  // ← → turn pages, unless you're typing.
-  useEffect(() => {
-    const onKey = (e: KeyboardEvent) => {
-      const t = e.target as HTMLElement;
-      if (t.closest('input, textarea, select, [contenteditable="true"]') || e.altKey || e.ctrlKey || e.metaKey) return;
-      if (e.key === 'ArrowLeft' && prev) router.push(prev);
-      if (e.key === 'ArrowRight' && next) router.push(next);
-    };
-    window.addEventListener('keydown', onKey);
-    return () => window.removeEventListener('keydown', onKey);
-  }, [prev, next, router]);
-
-  if (!ref) {
+export function BookView({ year, pageId: routeId }: { year: number; pageId: string }) {
+  const startIndex = sheetIndex(year, routeId);
+  if (startIndex < 0) {
     return (
       <main className="grid min-h-[60vh] place-items-center text-zinc-300">
         <div className="text-center">
@@ -56,14 +31,76 @@ export function BookView({ year, pageId }: { year: number; pageId: string }) {
       </main>
     );
   }
+  return <OpenBook year={year} routeId={routeId} startIndex={startIndex} />;
+}
 
-  const label = describe(ref);
+function OpenBook({ year, routeId, startIndex }: { year: number; routeId: string; startIndex: number }) {
+  const router = useRouter();
+  const qc = useQueryClient();
+  const search = useSearchParams();
+  const { data: settings } = useSettings();
+  const toc = useQuery({ queryKey: ['book', year], queryFn: () => api<BookToc>(`/book/${year}`) });
+  const [drawer, setDrawer] = useState(false);
+  const [marksOpen, setMarksOpen] = useState(false);
+  const [toolsEl, setToolsEl] = useState<HTMLDivElement | null>(null);
+  const bm = useBookmarks(year);
+
+  const nb = useNotebook(
+    year,
+    { index: startIndex, side: search.get('side') === 'notes' ? 'back' : 'front' },
+    {
+      // the address follows the page without a navigation (so nothing re-renders or reloads)
+      onMove: (c) => {
+        window.history.replaceState(window.history.state, '', hrefOf(year, c));
+        bm.remember(pageId(bookPages(year)[c.index]));
+      },
+      onEdge: (dir) => router.push(dir === 1 ? `/book/${year + 1}/d-${year + 1}-01-01` : `/book/${year - 1}/y?side=notes`),
+    },
+  );
+  const { cursor, turn, goTo } = nb;
+  const ref = bookPages(year)[cursor.index];
+  const currentId = pageId(ref);
+  const marked = bm.marks.includes(currentId);
+
+  // a link elsewhere in the app pointed at another page of this book
+  const seenRoute = useRef(routeId);
+  useEffect(() => {
+    if (seenRoute.current === routeId) return;
+    seenRoute.current = routeId;
+    goTo({ index: startIndex, side: 'front' });
+  }, [routeId, startIndex, goTo]);
+
+  const onSaved = useCallback(() => {
+    void qc.invalidateQueries({ queryKey: ['book', year] });
+  }, [qc, year]);
+
+  const pick = (id: string) => {
+    const i = sheetIndex(year, id);
+    if (i >= 0) goTo({ index: i, side: 'front' });
+  };
+  const today = todayIso();
+  const goToday = () => (today.startsWith(String(year)) ? pick(`d-${today}`) : router.push(todayHref()));
+
+  // ← → turn the page, B lays a ribbon in, unless you're typing
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      const t = e.target as HTMLElement;
+      if (t.closest('input, textarea, select, [contenteditable="true"]') || e.altKey || e.ctrlKey || e.metaKey) return;
+      if (e.key === 'ArrowLeft') turn(-1);
+      else if (e.key === 'ArrowRight') turn(1);
+      else if (e.key.toLowerCase() === 'b') bm.toggle(currentId);
+      else return;
+      e.preventDefault();
+    };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, [turn, bm, currentId]);
 
   return (
     <div className="mx-auto flex max-w-[1400px] gap-6 px-3 py-5 sm:px-4">
       {/* contents (desktop) */}
       <aside className="sticky top-[72px] hidden h-[calc(100dvh-88px)] w-[270px] flex-none overflow-y-auto pr-1 lg:block">
-        <Toc year={year} activeId={pageId} toc={toc.data} settings={settings} />
+        <Toc year={year} activeId={currentId} toc={toc.data} settings={settings} onPick={pick} />
       </aside>
 
       {/* contents (mobile drawer) */}
@@ -73,52 +110,73 @@ export function BookView({ year, pageId }: { year: number; pageId: string }) {
             <button className="mb-2 rounded p-1 text-zinc-300" onClick={() => setDrawer(false)} aria-label="Close contents">
               <X size={18} />
             </button>
-            <Toc year={year} activeId={pageId} toc={toc.data} settings={settings} onNavigate={() => setDrawer(false)} />
+            <Toc year={year} activeId={currentId} toc={toc.data} settings={settings} onPick={pick} onNavigate={() => setDrawer(false)} />
           </div>
         </div>
       )}
 
       <main className="min-w-0 flex-1">
-        <div className="mx-auto mb-3 flex max-w-[900px] items-center gap-2 text-zinc-300">
+        <div className="relative mx-auto mb-1 flex max-w-[900px] items-center gap-2 text-zinc-300">
           <button className="rounded-lg p-2 hover:bg-white/10 lg:hidden" onClick={() => setDrawer(true)} aria-label="Contents">
             <Menu size={18} />
           </button>
-          {prev && (
-            <Link href={prev} className="rounded-lg p-2 hover:bg-white/10" title="Previous page (←)">
-              <ChevronLeft size={18} />
-            </Link>
-          )}
-          <div className="min-w-0 flex-1 truncate text-center text-sm">
-            <span className="font-semibold text-white">{label}</span>
-            <span className="text-zinc-500"> · {side === 'front' ? 'front' : 'back (notes)'}</span>
-          </div>
-          {next && (
-            <Link href={next} className="rounded-lg p-2 hover:bg-white/10" title="Next page (→)">
-              <ChevronRight size={18} />
-            </Link>
-          )}
-          <button
-            onClick={() => {
-              setSide((s) => (s === 'front' ? 'back' : 'front'));
-              window.scrollTo({ top: 0, behavior: 'smooth' });
-            }}
-            className="flex items-center gap-1.5 rounded-lg bg-white px-3 py-1.5 text-sm font-semibold text-black hover:bg-zinc-200"
-            title="Turn the page over"
-          >
-            <RotateCw size={14} /> {side === 'front' ? 'Notes' : 'Front'}
+          <button className="rounded-lg p-2 hover:bg-white/10" onClick={() => turn(-1)} title="Previous page (←)" aria-label="Previous page">
+            <ChevronLeft size={18} />
           </button>
-          <Link href={todayHref()} className="hidden items-center gap-1.5 rounded-lg px-3 py-1.5 text-sm hover:bg-white/10 sm:flex" title="Today's page">
+          <div className="min-w-0 flex-1 truncate text-center text-sm">
+            <span className="font-semibold text-white">{describe(ref)}</span>
+            <span className="text-zinc-500">
+              {' '}
+              · {cursor.side === 'front' ? 'front' : 'notes'} · page {nb.pageNo} of {nb.pageTotal}
+            </span>
+          </div>
+          <button className="rounded-lg p-2 hover:bg-white/10" onClick={() => turn(1)} title="Next page (→)" aria-label="Next page">
+            <ChevronRight size={18} />
+          </button>
+          <button
+            onClick={() => goTo({ index: cursor.index, side: cursor.side === 'front' ? 'back' : 'front' })}
+            className="flex items-center gap-1.5 rounded-lg bg-white px-3 py-1.5 text-sm font-semibold text-black hover:bg-zinc-200"
+            title="Turn to the other side of this sheet"
+          >
+            <RotateCw size={14} /> {cursor.side === 'front' ? 'Notes' : 'Front'}
+          </button>
+          <button
+            onClick={() => bm.toggle(currentId)}
+            onContextMenu={(e) => {
+              e.preventDefault();
+              setMarksOpen((o) => !o);
+            }}
+            className={clsx('flex items-center gap-1.5 rounded-lg px-2.5 py-1.5 text-sm hover:bg-white/10', marked && 'text-[#f0b3bd]')}
+            title={marked ? 'Take the ribbon out (B)' : 'Lay a ribbon in this page (B)'}
+            aria-pressed={marked}
+          >
+            <RibbonSwatch size={16} on={marked} />
+          </button>
+          <button className="rounded-lg px-2 py-1.5 text-sm hover:bg-white/10" onClick={() => setMarksOpen((o) => !o)} title="Your bookmarks">
+            {bm.marks.length}
+          </button>
+          <button onClick={goToday} className="hidden items-center gap-1.5 rounded-lg px-3 py-1.5 text-sm hover:bg-white/10 sm:flex" title="Today's page">
             <CalendarDays size={15} /> Today
-          </Link>
+          </button>
+          {marksOpen && (
+            <BookmarkList
+              className="right-0 top-11"
+              year={year}
+              marks={bm.marks}
+              onPick={(id) => {
+                setMarksOpen(false);
+                pick(id);
+              }}
+              onRemove={(id) => bm.toggle(id)}
+              onClose={() => setMarksOpen(false)}
+            />
+          )}
         </div>
 
-        <div className="mx-auto max-w-[900px]">
-          {settings ? (
-            <PageFaces key={pageId} pageRef={ref} side={side} settings={settings} onSaved={onSaved} />
-          ) : (
-            <Blank />
-          )}
-        </div>
+        {/* formatting for the notes page: off the paper */}
+        <div ref={setToolsEl} className="nb-tools mx-auto max-w-[900px]" />
+
+        {settings ? <NotebookStage nb={nb} settings={settings} onSaved={onSaved} toolbarEl={toolsEl} marked={marked} /> : <div className="h-[60vh]" />}
       </main>
     </div>
   );
@@ -126,107 +184,7 @@ export function BookView({ year, pageId }: { year: number; pageId: string }) {
 
 export function describe(ref: PageRef): string {
   if (ref.kind === 'day') return longDate(ref.date) + (ref.date === todayIso() ? ' · today' : '');
-  if (ref.kind === 'week') return `Weekly review · ${shortDate(ref.monday)}`;
+  if (ref.kind === 'week') return `Week ${isoWeek(ref.monday)} review`;
   if (ref.kind === 'month') return `${monthName(ref.month)} review`;
   return `The year ${ref.year}`;
-}
-
-function Blank() {
-  return <div className="paper animate-pulse" />;
-}
-
-/** Both faces of one sheet, stacked for the 3D page-turn. */
-export function PageFaces({ pageRef, side, settings, onSaved }: { pageRef: PageRef; side: 'front' | 'back'; settings: Settings; onSaved: () => void }) {
-  const faces = useFaces(pageRef, settings, onSaved);
-  if (!faces) return <Blank />;
-  return (
-    <div className="flip">
-      <div className={clsx('flip-inner', side === 'back' && 'turned')}>
-        <div className="flip-face" aria-hidden={side === 'back'} inert={side === 'back' ? true : undefined}>
-          {faces.front}
-        </div>
-        <div className="flip-face back-face" aria-hidden={side === 'front'} inert={side === 'front' ? true : undefined}>
-          {faces.back}
-        </div>
-      </div>
-    </div>
-  );
-}
-
-function useFaces(ref: PageRef, settings: Settings, onSaved: () => void): { front: React.ReactNode; back: React.ReactNode } | null {
-  const key =
-    ref.kind === 'day' ? ['day', ref.date] : ref.kind === 'week' ? ['week', ref.monday] : ref.kind === 'month' ? ['month', ref.month] : ['year', ref.year];
-  const url =
-    ref.kind === 'day'
-      ? `/today?date=${ref.date}`
-      : ref.kind === 'week'
-        ? `/reviews/week/${ref.monday}`
-        : ref.kind === 'month'
-          ? `/reviews/month/${ref.month}`
-          : `/reviews/year/${ref.year}`;
-  const q = useQuery({ queryKey: key, queryFn: () => api<unknown>(url), staleTime: 0 });
-  if (!q.data) return null;
-
-  if (ref.kind === 'day') {
-    const d = q.data as DayData;
-    return {
-      front: <DailyFront data={d} settings={settings} onSaved={onSaved} />,
-      back: (
-        <NotesBack
-          kicker="Groundwork · Daily · back"
-          title="Notes"
-          meta={<b>{longDate(d.date)}</b>}
-          initial={d.log.notes}
-          save={(notes, keepalive) => put(`/logs/${d.date}`, { notes }, keepalive)}
-          onSaved={onSaved}
-        />
-      ),
-    };
-  }
-  if (ref.kind === 'week') {
-    const w = q.data as WeekData;
-    return {
-      front: <WeekFront data={w} settings={settings} onSaved={onSaved} />,
-      back: (
-        <NotesBack
-          kicker="Groundwork · Weekly · back"
-          title="Week notes"
-          meta={<b>{`${shortDate(w.weekStart)} – ${shortDate(w.weekEnd)}`}</b>}
-          initial={w.notes}
-          save={(notes, keepalive) => put(`/reviews/week/${w.weekStart}`, { notes }, keepalive)}
-          onSaved={onSaved}
-        />
-      ),
-    };
-  }
-  if (ref.kind === 'month') {
-    const m = q.data as MonthData;
-    return {
-      front: <MonthFront data={m} settings={settings} onSaved={onSaved} />,
-      back: (
-        <NotesBack
-          kicker="Groundwork · Monthly · back"
-          title="Month notes"
-          meta={<b>{monthName(m.month)}</b>}
-          initial={m.notes}
-          save={(notes, keepalive) => put(`/reviews/month/${m.month}`, { notes }, keepalive)}
-          onSaved={onSaved}
-        />
-      ),
-    };
-  }
-  const y = q.data as YearData;
-  return {
-    front: <YearFront data={y} settings={settings} onSaved={onSaved} />,
-    back: (
-      <NotesBack
-        kicker="Groundwork · Yearly · back"
-        title="Year notes"
-        meta={<b>{y.year}</b>}
-        initial={y.notes}
-        save={(notes, keepalive) => put(`/reviews/year/${y.year}`, { notes }, keepalive)}
-        onSaved={onSaved}
-      />
-    ),
-  };
 }

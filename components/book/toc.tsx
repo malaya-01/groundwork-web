@@ -4,24 +4,33 @@ import Link from 'next/link';
 import { useState } from 'react';
 import { ChevronDown, ChevronLeft, ChevronRight } from 'lucide-react';
 import clsx from 'clsx';
-import { MONTHS, addDays, daysInMonth, parseIso, pad, todayIso } from '@/lib/dates';
+import { MONTHS, addDays, daysInMonth, isoWeek, parseIso, pad, todayIso } from '@/lib/dates';
 import type { BookToc, Settings } from '@/lib/types';
-import { weekNumber } from '@/lib/dates';
 
 /** Table of contents: the year is the book, each month a section ("file"). */
 export function Toc({
   year,
   activeId,
   toc,
-  settings,
   onNavigate,
+  onPick,
 }: {
   year: number;
   activeId: string;
   toc: BookToc | undefined;
-  settings: Settings | undefined;
+  settings?: Settings | undefined;
   onNavigate?: () => void;
+  /** turn to a page of this book in place (instead of navigating) */
+  onPick?: (id: string) => void;
 }) {
+  /** a page of this book: turned to in place when the notebook is open */
+  const go = (id: string) => (e: React.MouseEvent) => {
+    if (onPick && !e.metaKey && !e.ctrlKey && !e.shiftKey && e.button === 0) {
+      e.preventDefault();
+      onPick(id);
+    }
+    onNavigate?.();
+  };
   const activeMonth = activeId.startsWith('d-') || activeId.startsWith('m-') ? activeId.slice(2, 9) : activeId.startsWith('w-') ? addDays(activeId.slice(2), 6).slice(0, 7) : null;
   const [open, setOpen] = useState<Set<string>>(() => new Set(activeMonth ? [activeMonth] : []));
   const today = todayIso();
@@ -91,7 +100,7 @@ export function Toc({
                       <Link
                         key={date}
                         href={`/book/${year}/${id}`}
-                        onClick={onNavigate}
+                        onClick={go(id)}
                         title={info ? `${info.floor}/3 Floor${info.hasNotes ? ' · notes' : ''}` : 'blank page'}
                         className={clsx(
                           'relative grid aspect-square place-items-center rounded-md text-[11px] tabular-nums',
@@ -111,22 +120,21 @@ export function Toc({
                   {sundays.map((sun) => {
                     const monday = addDays(sun, -6);
                     const id = `w-${monday}`;
-                    const wk = settings ? weekNumber(settings.startDate, monday) : 0;
                     return (
                       <Link
                         key={id}
                         href={`/book/${year}/${id}`}
-                        onClick={onNavigate}
+                        onClick={go(id)}
                         className={clsx('flex justify-between rounded-md px-2 py-1 text-[12px] hover:bg-white/10', activeId === id ? 'bg-white text-black' : 'text-zinc-300')}
                       >
-                        <span>{wk > 0 ? `Weekly review · Week ${wk}` : `Week of ${Number(monday.slice(8))} ${MONTHS[Number(monday.slice(5, 7)) - 1].slice(0, 3)}`}</span>
+                        <span>Week {isoWeek(monday)} review</span>
                         {toc?.weeks.includes(monday) && <span>✓</span>}
                       </Link>
                     );
                   })}
                   <Link
                     href={`/book/${year}/m-${ym}`}
-                    onClick={onNavigate}
+                    onClick={go(`m-${ym}`)}
                     className={clsx('flex justify-between rounded-md px-2 py-1 text-[12px] font-semibold hover:bg-white/10', activeId === `m-${ym}` ? 'bg-white text-black' : 'text-zinc-200')}
                   >
                     <span>{name} review</span>
@@ -141,7 +149,7 @@ export function Toc({
 
       <Link
         href={`/book/${year}/y`}
-        onClick={onNavigate}
+        onClick={go('y')}
         className={clsx('mt-2 flex justify-between rounded-xl px-3 py-2.5 font-semibold hover:bg-white/10', activeId === 'y' ? 'bg-white text-black' : 'bg-white/[0.04] text-zinc-100')}
       >
         <span>The year {year} · review</span>

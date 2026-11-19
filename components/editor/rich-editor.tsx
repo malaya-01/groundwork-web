@@ -1,7 +1,9 @@
 'use client';
 
 import { useEffect, useRef } from 'react';
+import { createPortal } from 'react-dom';
 import { EditorContent, useEditor, type Editor } from '@tiptap/react';
+import type { EditorState } from '@tiptap/pm/state';
 import StarterKit from '@tiptap/starter-kit';
 import Underline from '@tiptap/extension-underline';
 import TextStyle from '@tiptap/extension-text-style';
@@ -17,7 +19,6 @@ import Table from '@tiptap/extension-table';
 import TableRow from '@tiptap/extension-table-row';
 import TableHeader from '@tiptap/extension-table-header';
 import TableCell from '@tiptap/extension-table-cell';
-import CharacterCount from '@tiptap/extension-character-count';
 import Subscript from '@tiptap/extension-subscript';
 import Superscript from '@tiptap/extension-superscript';
 import {
@@ -54,20 +55,40 @@ import { EDITOR_FONTS } from '@/lib/fonts';
 
 const SIZES = ['12px', '14px', '16px', '18px', '20px', '24px', '28px', '32px', '40px', '48px'];
 
+/**
+ * Rich text on a page. The writing area has a fixed size (it's paper): a change that would run
+ * past the bottom of the page is refused, as on a real sheet. Shortening is always allowed, so
+ * an over-full page (e.g. after switching to a bigger font) can still be edited down.
+ *
+ * `toolbarTarget`: where the formatting toolbar goes. undefined = above the text;
+ * an element = portalled there (off the paper); null = hidden.
+ */
 export function RichEditor({
   value,
   onChange,
   placeholder = 'Write anything: thoughts, notes, rough work, code…',
+  className,
+  toolbarTarget,
+  onFull,
 }: {
   value: string;
   onChange: (html: string) => void;
   placeholder?: string;
+  className?: string;
+  toolbarTarget?: HTMLElement | null;
+  onFull?: () => void;
 }) {
   const onChangeRef = useRef(onChange);
   onChangeRef.current = onChange;
+  const onFullRef = useRef(onFull);
+  onFullRef.current = onFull;
+  const box = useRef<HTMLDivElement>(null);
+  const good = useRef<{ state: EditorState | null; height: number; html: string }>({ state: null, height: 0, html: value });
 
   const editor = useEditor({
-    immediatelyRender: false,
+    // pages are only ever rendered in the browser (their data is fetched client-side), so the
+    // editor can render on the first pass instead of popping in a frame later
+    immediatelyRender: typeof window !== 'undefined',
     extensions: [
       StarterKit.configure({ heading: { levels: [1, 2, 3] } }),
       Underline,
@@ -81,38 +102,58 @@ export function RichEditor({
       TaskList,
       TaskItem.configure({ nested: true }),
       Placeholder.configure({ placeholder }),
-      Table.configure({ resizable: true }),
+      Table.configure({ resizable: false }),
       TableRow,
       TableHeader,
       TableCell,
-      CharacterCount,
       Subscript,
       Superscript,
     ],
     content: value || '',
-    onUpdate: ({ editor }) => onChangeRef.current(editor.isEmpty ? '' : editor.getHTML()),
+    onCreate: ({ editor }) => {
+      good.current.state = editor.state;
+      good.current.height = (editor.view.dom as HTMLElement).scrollHeight;
+    },
+    onTransaction: ({ editor, transaction }) => {
+      const g = good.current;
+      const el = box.current;
+      if (transaction.docChanged && el) {
+        const h = (editor.view.dom as HTMLElement).scrollHeight;
+        // ran off the page (and made it longer than it already was): undo this one change
+        if (h > el.clientHeight + 1 && h > g.height && g.state) {
+          editor.view.updateState(g.state);
+          onFullRef.current?.();
+          return;
+        }
+        g.height = h;
+      }
+      g.state = editor.state;
+    },
+    onUpdate: ({ editor }) => {
+      const html = editor.isEmpty ? '' : editor.getHTML();
+      if (html === good.current.html) return;
+      good.current.html = html;
+      onChangeRef.current(html);
+    },
     editorProps: { attributes: { spellcheck: 'true' } },
   });
 
   // If the stored note changes underneath us (e.g. first load), show it.
   useEffect(() => {
     if (editor && !editor.isFocused && value !== editor.getHTML() && !(value === '' && editor.isEmpty)) {
+      good.current.html = value;
       editor.commands.setContent(value || '', false);
     }
   }, [editor, value]);
 
+  const toolbar = <Toolbar editor={editor} />;
   return (
-    <div className="flex flex-col gap-3">
-      <Toolbar editor={editor} />
-      <div className="editor-content dot-paper rounded-md">
+    <>
+      {toolbarTarget === undefined ? toolbar : toolbarTarget ? createPortal(toolbar, toolbarTarget) : null}
+      <div ref={box} className={clsx('editor-content dot-paper', className)}>
         <EditorContent editor={editor} />
       </div>
-      {editor && (
-        <div className="text-right text-[11px] uppercase tracking-[0.14em] text-[color:var(--label)]">
-          {editor.storage.characterCount.words()} words · {editor.storage.characterCount.characters()} characters
-        </div>
-      )}
-    </div>
+    </>
   );
 }
 

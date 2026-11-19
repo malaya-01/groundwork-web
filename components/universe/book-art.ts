@@ -148,61 +148,66 @@ function wrap(ctx: CanvasRenderingContext2D, text: string, maxW: number): string
   return lines;
 }
 
-// ------------------------------------------------------------------ journals: leather year books
+// ------------------------------------------------------------------ journals: cloth-bound notebooks
+// A plain, well-made hardcover notebook: matte book cloth, the name and year blind-debossed
+// (pressed in, no foil), and an elastic band to keep it shut. Nothing antique, nothing gilded.
 const journalHue = (year: number) => [210, 350, 160, 28, 265, 190, 5][((year % 7) + 7) % 7];
 function journalLeather(year: number) {
   const hue = journalHue(year);
-  return { base: `hsl(${hue} 32% 20%)`, dark: `hsl(${hue} 38% 9%)`, mid: `hsl(${hue} 30% 15%)` };
+  return { base: `hsl(${hue} 26% 21%)`, dark: `hsl(${hue} 30% 12%)`, mid: `hsl(${hue} 26% 16%)`, band: `hsl(${hue} 22% 8%)` };
 }
 
-function journalFront(b: UBook, aspect: number, written: number): Maps {
+/** Lettering pressed into the cloth: a shadowed hollow with a faint lit lower lip. */
+function deboss(
+  ctx: CanvasRenderingContext2D,
+  s: (x: Surface) => string | CanvasGradient | CanvasPattern,
+  text: string,
+  x: number,
+  y: number,
+  font: (size: number) => string,
+  size: number,
+  maxW: number,
+  ls = 0,
+) {
+  type(ctx, s, { color: 'rgba(255,255,255,0.07)', h: 0.5, rough: 0.8 }, text, x, y + 2, font, size, maxW, ls);
+  type(ctx, s, { color: 'rgba(0,0,0,0.34)', h: 0.3, rough: 0.9 }, text, x, y, font, size, maxW, ls);
+}
+
+/** The elastic closure band: woven, slightly raised, casting a soft shadow on the cloth. */
+function elastic(ctx: CanvasRenderingContext2D, layer: Layer, s: (x: Surface) => string | CanvasGradient | CanvasPattern, x: number, h: number, band: string) {
+  const bw = 26;
+  ctx.fillStyle = s({ color: 'rgba(0,0,0,0.28)', h: 0.42, rough: 0.85 });
+  ctx.fillRect(x - 5, 0, bw + 10, h);
+  const g = ctx.createLinearGradient(x, 0, x + bw, 0);
+  g.addColorStop(0, band);
+  g.addColorStop(0.45, 'rgba(70,70,70,0.9)');
+  g.addColorStop(1, band);
+  ctx.fillStyle = s({ color: g, h: 0.85, rough: 0.55 });
+  ctx.fillRect(x, 0, bw, h);
+  for (let y = 0; y < h; y += 4) {
+    ctx.fillStyle = layer === 'bump' ? 'rgba(0,0,0,0.12)' : layer === 'color' ? 'rgba(255,255,255,0.045)' : 'rgba(0,0,0,0)';
+    ctx.fillRect(x, y, bw, 2);
+  }
+}
+
+function journalFront(b: UBook, aspect: number, _written: number): Maps {
   const L = journalLeather(b.year!);
   return paint(aspect, (ctx, layer, w, h, s) => {
     const g = ctx.createLinearGradient(0, 0, w, h);
     g.addColorStop(0, L.base);
     g.addColorStop(1, L.dark);
-    ctx.fillStyle = s({ color: g, h: 0.5, rough: 0.58, metal: 0 });
+    ctx.fillStyle = s({ color: g, h: 0.5, rough: 0.86, metal: 0 });
     ctx.fillRect(0, 0, w, h);
-    grain(ctx, layer, w, h, b.year!);
-    // hinge groove near the spine (the cover's spine edge is on the left)
-    ctx.fillStyle = s({ color: 'rgba(0,0,0,0.35)', h: 0.2, rough: 0.7 });
-    ctx.fillRect(34, 0, 7, h);
-    // blind-stamped outer frame + gold inner rule
-    ctx.lineWidth = 10;
-    ctx.strokeStyle = s({ color: 'rgba(0,0,0,0.28)', h: 0.28, rough: 0.66 });
-    ctx.strokeRect(70, 52, w - 112, h - 104);
-    ctx.lineWidth = 3;
-    ctx.strokeStyle = s({ color: gold(ctx, 0, w), h: 0.42, ...FOIL });
-    ctx.strokeRect(92, 74, w - 156, h - 148);
-    // corner fleurons
-    for (const [x, y] of [
-      [92, 74],
-      [w - 64, 74],
-      [92, h - 74],
-      [w - 64, h - 74],
-    ]) {
-      ctx.save();
-      ctx.translate(x, y);
-      ctx.rotate(Math.PI / 4);
-      ctx.fillStyle = s({ color: gold(ctx, -10, 10), h: 0.4, ...FOIL });
-      ctx.fillRect(-9, -9, 18, 18);
-      ctx.restore();
-    }
-    const cx = (w + 28) / 2;
-    const foil = { color: gold(ctx, 0, w), h: 0.36, ...FOIL };
-    type(ctx, s, foil, 'GROUNDWORK', cx, 230, (z) => `600 ${z}px ${CINZEL}`, 40, w - 260, 14);
-    // emblem: a ticked box
-    ctx.lineWidth = 5;
-    ctx.strokeStyle = s(foil);
-    ctx.strokeRect(cx - 40, 300, 80, 80);
-    ctx.beginPath();
-    ctx.moveTo(cx - 22, 340);
-    ctx.lineTo(cx - 4, 360);
-    ctx.lineTo(cx + 28, 316);
-    ctx.stroke();
-    type(ctx, s, foil, String(b.year), cx, h * 0.56, (z) => `600 ${z}px ${CINZEL}`, 210, w - 220);
-    type(ctx, s, { ...foil, color: gold(ctx, 0, w, 'champagne') }, 'the year book', cx, h * 0.56 + 76, (z) => `italic 500 ${z}px ${CINZEL}`, 46, w - 260);
-    type(ctx, s, foil, written ? `${written} ${written === 1 ? 'PAGE' : 'PAGES'} WRITTEN` : 'UNWRITTEN', cx, h - 150, (z) => `600 ${z}px ${CINZEL}`, 26, w - 260, 6);
+    grain(ctx, layer, w, h, b.year!, 16000);
+    // the hinge groove by the spine (the cover's spine edge is on the left)
+    ctx.fillStyle = s({ color: 'rgba(0,0,0,0.32)', h: 0.28, rough: 0.9 });
+    ctx.fillRect(30, 0, 6, h);
+    ctx.fillStyle = s({ color: 'rgba(255,255,255,0.05)', h: 0.6, rough: 0.9 });
+    ctx.fillRect(36, 0, 2, h);
+    const cx = (w - 40) / 2 + 20;
+    deboss(ctx, s, 'GROUNDWORK', cx, h * 0.8, (z) => `600 ${z}px Inter, sans-serif`, 22, w - 300, 9);
+    deboss(ctx, s, String(b.year), cx, h * 0.8 + 62, (z) => `500 ${z}px Inter, sans-serif`, 48, w - 300, 6);
+    elastic(ctx, layer, s, w - 76, h, L.band);
   });
 }
 
@@ -212,18 +217,15 @@ function journalBack(b: UBook, aspect: number): Maps {
     const g = ctx.createLinearGradient(w, 0, 0, h);
     g.addColorStop(0, L.base);
     g.addColorStop(1, L.dark);
-    ctx.fillStyle = s({ color: g, h: 0.5, rough: 0.6 });
+    ctx.fillStyle = s({ color: g, h: 0.5, rough: 0.86 });
     ctx.fillRect(0, 0, w, h);
-    grain(ctx, layer, w, h, b.year! + 9);
-    ctx.lineWidth = 10;
-    ctx.strokeStyle = s({ color: 'rgba(0,0,0,0.28)', h: 0.28, rough: 0.66 });
-    ctx.strokeRect(42, 52, w - 112, h - 104);
-    const cx = (w - 28) / 2;
-    // blind emblem
-    ctx.lineWidth = 6;
-    ctx.strokeStyle = s({ color: 'rgba(0,0,0,0.3)', h: 0.25, rough: 0.66 });
-    ctx.strokeRect(cx - 50, h / 2 - 90, 100, 100);
-    type(ctx, s, { color: gold(ctx, 0, w, 'champagne'), h: 0.4, ...FOIL }, 'never miss twice', cx, h - 170, (z) => `italic 500 ${z}px ${CINZEL}`, 40, w - 220);
+    grain(ctx, layer, w, h, b.year! + 9, 16000);
+    ctx.fillStyle = s({ color: 'rgba(0,0,0,0.32)', h: 0.28, rough: 0.9 });
+    ctx.fillRect(w - 36, 0, 6, h);
+    const cx = (w - 40) / 2 + 20;
+    deboss(ctx, s, 'never miss twice', cx, h - 120, (z) => `italic 500 ${z}px ${CINZEL}`, 34, w - 300);
+    // the band is fixed through the back board, near the fore-edge
+    elastic(ctx, layer, s, 50, h, L.band);
   });
 }
 
@@ -373,9 +375,21 @@ export function spineMaps(b: UBook): Maps {
     g.addColorStop(1, dark);
     ctx.fillStyle = s({ color: g, h: 0.5, rough: lib ? 0.42 : 0.58 });
     ctx.fillRect(0, 0, w, h);
-    if (!lib) grain(ctx, layer, w, h, b.year! + 3, 2400);
-    // raised bands with gold rules (journals), printed bands (library)
-    for (const y of lib ? [110, h - 110] : [180, 470, h - 470, h - 180]) {
+    if (!lib) {
+      // plain book cloth, the year pressed in near the head
+      grain(ctx, layer, w, h, b.year! + 3, 5000);
+      ctx.save();
+      ctx.translate(w / 2, h / 2);
+      ctx.rotate(Math.PI / 2);
+      ctx.textBaseline = 'middle';
+      deboss(ctx, s, String(b.year), -h / 2 + 260, 0, (z) => `500 ${z}px Inter, sans-serif`, 92, 360, 8);
+      deboss(ctx, s, 'GROUNDWORK', h / 2 - 330, 0, (z) => `600 ${z}px Inter, sans-serif`, 48, 420, 10);
+      ctx.restore();
+      ctx.textBaseline = 'alphabetic';
+      return;
+    }
+    // printed bands (library)
+    for (const y of [110, h - 110]) {
       ctx.fillStyle = s({ color: 'rgba(0,0,0,0.25)', h: lib ? 0.5 : 0.85, rough: 0.55 });
       ctx.fillRect(0, y - 16, w, 32);
       ctx.fillStyle = s({ color: gold(ctx, 0, w), h: lib ? 0.55 : 0.9, ...FOIL });
@@ -461,9 +475,9 @@ export function spineMapsFor(b: UBook): Maps {
   return m;
 }
 
-/** Page-edge colour: gilt for journals, a sprayed tint of the series colour for novels. */
+/** Page-edge colour: plain paper for journals, a sprayed tint of the series colour for novels. */
 export function edgeTone(b: UBook): { color: string; metal: number; rough: number } {
-  if (b.kind === 'journal') return { color: '#d8b46a', metal: 0.85, rough: 0.32 };
+  if (b.kind === 'journal') return { color: '#efe6d3', metal: 0, rough: 0.9 }; // plain cream paper
   const [r, g, bl] = rgbOf(b.vol!.series.accent);
   return { color: `rgb(${mix(r, 236, 0.62)}, ${mix(g, 228, 0.62)}, ${mix(bl, 210, 0.62)})`, metal: 0, rough: 0.85 };
 }

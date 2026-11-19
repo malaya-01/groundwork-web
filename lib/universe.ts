@@ -1,14 +1,14 @@
 // State + geometry for the 3D universe.
 //
 // Two kinds of book orbit the star:
-//   journal  – a year of Groundwork pages (writable: double-click / Enter → write mode)
+//   journal  – a year of Groundwork pages: opening one lays the real notebook in front of you
 //   library  – a volume of a Markdown novel (read-only: never editable; double-click / Enter zooms)
 import { create } from 'zustand';
 import { Euler, Vector3, type Object3D } from 'three';
 import { bookPages, pageId, type PageRef } from './book';
 import { todayIso } from './dates';
 import { estimatePages, locOf, pageOfLoc, type LibVolumeInfo, type Typeset } from './library';
-import type { DailyLog, ReadingState } from './types';
+import type { ReadingState } from './types';
 
 export type Mode = 'orbit' | 'carousel' | 'open' | 'write';
 export type BookKind = 'journal' | 'library';
@@ -87,17 +87,6 @@ export const view = {
 };
 export const MAX_ZOOM = 4;
 
-// ------------------------------------------------------------------ real 2D journal pages photographed for the 3D book
-export interface SnapRequest {
-  key: string;
-  year: number;
-  index: number;
-  side: 'front' | 'back';
-}
-/** key → canvas with the page image, already fitted to the 3D page's proportions */
-export const snapshots = new Map<string, HTMLCanvasElement>();
-export const snapKey = (year: number, index: number, side: 'front' | 'back', epoch: number) => `${year}:${index}:${side}:${epoch}`;
-
 // ------------------------------------------------------------------ store
 interface UState {
   books: UBook[];
@@ -109,24 +98,10 @@ interface UState {
   overlay: 'in' | 'out' | null;
   write: WriteTarget | null;
   hover: string | null;
-  logs: Record<string, DailyLog>;
-  logsYear: number | null;
-  font: string;
-  fontScale: number;
-  fontReady: boolean;
-  startDate: string;
-  codeA: string;
-  codeB: string;
-  username: string;
   speed: number;
   showOrbits: boolean;
   bloom: boolean;
   message: string | null;
-  /** bumps when page data changes, so page photos are retaken */
-  snapEpoch: number;
-  /** bumps when a new page photo is ready */
-  snapVersion: number;
-  snapQueue: SnapRequest[];
   /** bumps when a library book finishes typesetting */
   typesetVersion: number;
   /** a library book waiting for its text before it can open */
@@ -162,22 +137,10 @@ export const useU = create<UState>((set) => ({
   overlay: null,
   write: null,
   hover: null,
-  logs: {},
-  logsYear: null,
-  font: 'Caveat',
-  fontScale: 1.3,
-  fontReady: false,
-  startDate: '2026-11-16',
-  codeA: 'K',
-  codeB: 'N',
-  username: '',
   speed: 1,
   showOrbits: true,
   bloom: true,
   message: null,
-  snapEpoch: 0,
-  snapVersion: 0,
-  snapQueue: [],
   typesetVersion: 0,
   opening: null,
   reading: {},
@@ -189,25 +152,6 @@ export const useU = create<UState>((set) => ({
   readFont: 18,
   set: (p) => set(p),
 }));
-
-/** Photos that failed: don't retry them in a loop (a blank page is used). */
-export const snapFailed = new Set<string>();
-
-/** Ask for a real-page photo (no-op if we have it or it's already queued). */
-export function requestSnap(req: SnapRequest, priority = false) {
-  if (snapshots.has(req.key) || snapFailed.has(req.key)) return;
-  const { snapQueue } = useU.getState();
-  if (snapQueue.some((r) => r.key === req.key)) return;
-  useU.getState().set({ snapQueue: priority ? [req, ...snapQueue] : [...snapQueue, req] });
-}
-
-/** Page data changed: forget old photos (textures are re-created from the new ones). */
-export function invalidateSnaps() {
-  snapshots.clear();
-  snapFailed.clear();
-  const s = useU.getState();
-  s.set({ snapEpoch: s.snapEpoch + 1, snapQueue: [] });
-}
 
 /** Orbit time, advanced every frame (not React state: changes 60×/s). */
 export const clock = { t: 0 };
@@ -348,24 +292,27 @@ export function spreadLocation(): string | null {
 }
 
 /**
- * Opens the focused book. Journals open at today (this year) or where you stopped reading;
- * library books always open where you stopped (or at the title page).
+ * Opens the focused book. A journal opens as the real notebook (at today in this year's book,
+ * otherwise where you stopped, otherwise its first page); library books open in 3D where you
+ * stopped (or at the title page).
  */
 export function openBook() {
   const b = focusedBook();
   if (!b) return;
-  if (b.kind === 'library' && !typesets.has(b.id)) {
-    get().set({ opening: b.id }); // opens as soon as the text is typeset
-    return;
-  }
-  const last = get().reading[b.id]?.last;
-  let sheet = -1;
   if (b.kind === 'journal') {
     const pages = bookPages(b.year!);
     const today = todayIso();
-    if (today.startsWith(String(b.year))) sheet = Math.max(-1, pages.findIndex((p) => p.kind === 'day' && p.date === today) - 1);
-    else sheet = sheetForLocation(b, last) ?? -1;
-  } else sheet = sheetForLocation(b, last) ?? -1;
+    const last = get().reading[b.id]?.last;
+    let i = today.startsWith(String(b.year)) ? pages.findIndex((p) => p.kind === 'day' && p.date === today) : -1;
+    if (i < 0 && last) i = pages.findIndex((p) => pageId(p) === last);
+    openJournal(b, Math.max(0, i), 'front');
+    return;
+  }
+  if (!typesets.has(b.id)) {
+    get().set({ opening: b.id }); // opens as soon as the text is typeset
+    return;
+  }
+  const sheet = sheetForLocation(b, get().reading[b.id]?.last) ?? -1;
   resetZoom();
   view.yaw = view.pitch = 0;
   get().set({ mode: 'open', sheet, turn: null, opening: null, preview: false });
@@ -458,36 +405,38 @@ export function toggleTilt() {
   get().set({ tilted });
 }
 
-// ------------------------------------------------------------------ write mode (journals only)
+// ------------------------------------------------------------------ the notebook (journals)
 let writeTimer: ReturnType<typeof setTimeout> | undefined;
 
-/** 3D → 2D: fly into the page, then hand over to the paper editor. Library books are never editable. */
-export function enterWrite(side: 'front' | 'back' = 'front') {
-  const b = focusedBook();
-  if (!b || b.kind !== 'journal') return;
-  const sheets = bookPages(b.year!);
-  const { sheet } = get();
-  const ref = side === 'front' ? sheets[sheet + 1] : sheets[sheet];
+/** The book opens, the camera leans in, and the real notebook is laid in front of you. */
+function openJournal(b: UBook, index: number, side: 'front' | 'back') {
+  const ref = bookPages(b.year!)[index];
   if (!ref) return;
   clearTimeout(writeTimer);
   resetZoom();
-  get().set({ mode: 'write', write: { year: b.year!, pageId: pageId(ref), side }, focusMode: false });
-  writeTimer = setTimeout(() => get().set({ overlay: 'in' }), 750);
+  view.yaw = view.pitch = 0;
+  get().set({ mode: 'write', sheet: index - 1, turn: null, opening: null, preview: false, write: { year: b.year!, pageId: pageId(ref), side }, focusMode: false });
+  writeTimer = setTimeout(() => get().set({ overlay: 'in' }), 520);
 }
 
-/** 2D → 3D: fade the paper away, pull back out to the open book on the page you ended on. */
+/** Write on a page of the open journal (kept for keyboard / HUD shortcuts). */
+export function enterWrite(side: 'front' | 'back' = 'front') {
+  const b = focusedBook();
+  if (!b || b.kind !== 'journal') return;
+  const { sheet } = get();
+  openJournal(b, side === 'front' ? sheet + 1 : Math.max(0, sheet), side);
+}
+
+/** Closes the notebook: it fades away and the book closes back onto its pedestal. */
 export function exitWrite(endPageId?: string) {
   const b = focusedBook();
   clearTimeout(writeTimer);
+  if (b?.kind === 'journal' && endPageId) {
+    const i = bookPages(b.year!).findIndex((p) => pageId(p) === endPageId);
+    if (i >= 0) get().set({ sheet: i - 1 });
+  }
   get().set({ overlay: 'out' });
-  writeTimer = setTimeout(() => {
-    let sheet = get().sheet;
-    if (b?.kind === 'journal' && endPageId) {
-      const i = bookPages(b.year!).findIndex((p) => pageId(p) === endPageId);
-      if (i >= 0) sheet = i - 1;
-    }
-    get().set({ overlay: null, mode: 'open', write: null, sheet });
-  }, 450);
+  writeTimer = setTimeout(() => get().set({ overlay: null, mode: 'carousel', write: null }), 420);
 }
 
 // ------------------------------------------------------------------ building the book list

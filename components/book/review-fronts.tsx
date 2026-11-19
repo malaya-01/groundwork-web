@@ -1,18 +1,19 @@
 'use client';
 
 import { useState } from 'react';
+import { useQueryClient } from '@tanstack/react-query';
 import { put } from '@/lib/api';
 import { useAutosave } from '@/lib/hooks';
-import { DOW, MON, addDays, daysInMonth, monthName, parseIso, shortDate, weekNumber } from '@/lib/dates';
+import { DOW, MON, addDays, daysInMonth, isoWeek, monthName, parseIso, shortDate } from '@/lib/dates';
 import type { MonthData, Settings, Stats, WeekData, YearData } from '@/lib/types';
-import { Area, Check, Line, Paper, Pick, SaveBadge, Section, Stat, int, num } from './paper';
+import { Area, Check, HandInput, Line, Paper, Pick, SaveBadge, Section, Stat, int, num } from './paper';
 
 const str = (v: unknown) => (typeof v === 'string' ? v : '');
 const hours = (min: number) => Math.round((min / 60) * 10) / 10;
 
 function StatsGrid({ s, settings }: { s: Stats; settings: Settings }) {
   return (
-    <div className="grid grid-cols-3 gap-2 sm:grid-cols-4 md:grid-cols-7">
+    <div className="grid grid-cols-7 gap-1.5">
       <Stat label={`Floor days /${s.loggedDays || 0}`} value={s.floorDays} />
       <Stat label="Study hrs" value={hours(s.studyMinutes)} />
       <Stat label="Solved solo" value={s.soloSolved} />
@@ -37,6 +38,8 @@ type Resolve = { problem: string; due: string; done: boolean };
 type Health = { physician: boolean; physio: boolean; therapist: boolean; other: boolean; painTrend: string; note: string; question: string };
 
 export function WeekFront({ data, settings, onSaved }: { data: WeekData; settings: Settings; onSaved: () => void }) {
+  const qc = useQueryClient();
+  const cache = (p: Partial<WeekData>) => qc.setQueryData<WeekData>(['week', data.weekStart], (d) => (d ? { ...d, ...p } : d));
   const [answers, setAnswers] = useState<Record<string, unknown>>(data.answers);
   const [nums, setNums] = useState({
     weightKg: data.weightKg,
@@ -52,23 +55,24 @@ export function WeekFront({ data, settings, onSaved }: { data: WeekData; setting
   const setA = (key: string, value: unknown) => {
     const next = { ...answers, [key]: value };
     setAnswers(next);
+    cache({ answers: next });
     queue({ answers: next });
   };
   const setN = (key: keyof typeof nums, value: number | null) => {
     setNums((n) => ({ ...n, [key]: value }));
+    cache({ [key]: value });
     queue({ [key]: value });
   };
 
-  const wk = weekNumber(settings.startDate, data.weekStart);
   const plan = (answers.plan as PlanDay[] | undefined) ?? Array.from({ length: 7 }, () => ({ topic: '', walk: '', other: '' }));
-  const resolve = (answers.resolve as Resolve[] | undefined) ?? Array.from({ length: 5 }, () => ({ problem: '', due: '', done: false }));
+  const resolve = (answers.resolve as Resolve[] | undefined) ?? Array.from({ length: 4 }, () => ({ problem: '', due: '', done: false }));
   const health = (answers.health as Health | undefined) ?? { physician: false, physio: false, therapist: false, other: false, painTrend: '', note: '', question: '' };
   const nextMonday = addDays(data.weekStart, 7);
 
   return (
     <Paper
-      kicker="Groundwork · Weekly review · Sunday, 30 min"
-      title={wk > 0 ? `Week ${String(wk).padStart(2, '0')}` : 'Week'}
+      kicker={`Groundwork · ${data.weekEnd.slice(0, 4)} · weekly review · Sunday, 30 min`}
+      title={`Week ${isoWeek(data.weekStart)}`}
       meta={
         <>
           <b>
@@ -77,43 +81,43 @@ export function WeekFront({ data, settings, onSaved }: { data: WeekData; setting
           <div>counted from your daily pages</div>
         </>
       }
-      footRight={<SaveBadge status={status} />}
+      status={<SaveBadge status={status} />}
     >
       <Section title="1 · This week, counted" hint="filled in automatically" />
       <StatsGrid s={data.stats} settings={settings} />
-      <div className="flex flex-wrap items-end gap-x-6 gap-y-2">
+      <div className="flex items-end gap-x-6">
         <Line label="Weight today (kg)" inputMode="decimal" value={nums.weightKg} onChange={(v) => setN('weightKg', num(v))} width={80} />
         <Line label="Spent ₹" inputMode="decimal" value={nums.spent} onChange={(v) => setN('spent', num(v))} width={100} />
         <Line label="Sent / saved ₹" inputMode="decimal" value={nums.sentSaved} onChange={(v) => setN('sentSaved', num(v))} width={100} />
         <Line label="Confidence reps" inputMode="numeric" value={nums.confidenceReps} onChange={(v) => setN('confidenceReps', int(v))} width={60} />
       </div>
 
-      <div className="grid gap-5 md:grid-cols-2">
+      <div className="grid grid-cols-2 gap-x-5 gap-y-2">
         <div>
           <Section title="2 · What worked" hint="keep it" />
-          <Area rows={3} value={str(answers.worked)} onChange={(v) => setA('worked', v)} />
+          <Area rows={2} value={str(answers.worked)} onChange={(v) => setA('worked', v)} />
         </div>
         <div>
           <Section title="3 · What broke" hint="which triggers repeat?" />
-          <Area rows={3} value={str(answers.broke)} onChange={(v) => setA('broke', v)} />
+          <Area rows={2} value={str(answers.broke)} onChange={(v) => setA('broke', v)} />
         </div>
         <div>
           <Section title="4 · Parked ideas" hint="most get dropped" />
-          <Area rows={3} value={str(answers.parked)} onChange={(v) => setA('parked', v)} />
+          <Area rows={2} value={str(answers.parked)} onChange={(v) => setA('parked', v)} />
         </div>
         <div>
           <Section title="5 · The ONE change" hint="only one" />
-          <div className="mt-2 rounded-lg border-2 border-[#1d1c1a] p-2">
+          <div className="mt-1 rounded-lg border-2 border-[#1d1c1a] px-2">
             <Area rows={2} value={str(answers.oneChange)} onChange={(v) => setA('oneChange', v)} />
           </div>
         </div>
       </div>
 
       <Section title="6 · Next week" hint={`${shortDate(nextMonday)} – ${shortDate(addDays(nextMonday, 6))}`} />
-      <div className="overflow-x-auto">
-        <table className="p-table min-w-[640px]">
+      <div>
+        <table className="p-table">
           <colgroup>
-            <col style={{ width: 96 }} />
+            <col style={{ width: 92 }} />
           </colgroup>
           <thead>
             <tr>
@@ -134,11 +138,7 @@ export function WeekFront({ data, settings, onSaved }: { data: WeekData; setting
                 <td className="k">{row === 'topic' ? 'Study topic' : row === 'walk' ? 'Walk target' : 'Other'}</td>
                 {plan.map((p, i) => (
                   <td key={i}>
-                    <input
-                      className="hand-input"
-                      value={p[row]}
-                      onChange={(e) => setA('plan', plan.map((x, j) => (j === i ? { ...x, [row]: e.target.value } : x)))}
-                    />
+                    <HandInput value={p[row]} onChange={(v) => setA('plan', plan.map((x, j) => (j === i ? { ...x, [row]: v } : x)))} />
                   </td>
                 ))}
               </tr>
@@ -147,7 +147,7 @@ export function WeekFront({ data, settings, onSaved }: { data: WeekData; setting
         </table>
       </div>
 
-      <div className="grid gap-5 md:grid-cols-2">
+      <div className="grid grid-cols-2 gap-5">
         <div>
           <Section title="7 · Re-solve queue" hint="1 · 3 · 7 · 21 days" />
           <table className="p-table mt-2">
@@ -169,10 +169,10 @@ export function WeekFront({ data, settings, onSaved }: { data: WeekData; setting
                 return (
                   <tr key={i}>
                     <td>
-                      <input className="hand-input" value={r.problem} onChange={(e) => setR({ problem: e.target.value })} />
+                      <HandInput value={r.problem} onChange={(v) => setR({ problem: v })} />
                     </td>
                     <td>
-                      <input className="hand-input" value={r.due} onChange={(e) => setR({ due: e.target.value })} />
+                      <HandInput value={r.due} onChange={(v) => setR({ due: v })} />
                     </td>
                     <td className="text-center">
                       <Check checked={r.done} onChange={(v) => setR({ done: v })} />
@@ -183,9 +183,9 @@ export function WeekFront({ data, settings, onSaved }: { data: WeekData; setting
             </tbody>
           </table>
         </div>
-        <div className="flex flex-col gap-3">
+        <div className="flex flex-col gap-2">
           <Section title="8 · Health check" />
-          <div className="flex flex-wrap gap-4">
+          <div className="flex gap-4">
             {(['physician', 'physio', 'therapist', 'other'] as const).map((k) => (
               <Check key={k} checked={health[k]} onChange={(v) => setA('health', { ...health, [k]: v })} label={k[0].toUpperCase() + k.slice(1)} />
             ))}
@@ -202,12 +202,12 @@ export function WeekFront({ data, settings, onSaved }: { data: WeekData; setting
               onChange={(v) => setA('health', { ...health, painTrend: v ?? '' })}
             />
           </div>
-          <Area label="Back / breath notes" rows={2} value={health.note} onChange={(v) => setA('health', { ...health, note: v })} />
-          <Area label="Question for my next appointment" rows={2} value={health.question} onChange={(v) => setA('health', { ...health, question: v })} />
+          <Area label="Back / breath notes" rows={1} value={health.note} onChange={(v) => setA('health', { ...health, note: v })} />
+          <Area label="Question for my next appointment" rows={1} value={health.question} onChange={(v) => setA('health', { ...health, question: v })} />
         </div>
       </div>
 
-      <div className="grid gap-5 md:grid-cols-2">
+      <div className="grid grid-cols-2 gap-5">
         <div>
           <Section title="9 · Three wins this week" />
           <Area rows={3} value={str(answers.wins)} onChange={(v) => setA('wins', v)} />
@@ -236,6 +236,8 @@ const SCORE_ROWS: { key: string; label: string }[] = [
 type ScoreCell = { start?: string; end?: string; target?: string };
 
 export function MonthFront({ data, settings, onSaved }: { data: MonthData; settings: Settings; onSaved: () => void }) {
+  const qc = useQueryClient();
+  const cache = (p: Partial<MonthData>) => qc.setQueryData<MonthData>(['month', data.month], (d) => (d ? { ...d, ...p } : d));
   const [answers, setAnswers] = useState<Record<string, unknown>>(data.answers);
   const [score, setScore] = useState<Record<string, ScoreCell>>(data.scorecard as Record<string, ScoreCell>);
   const { queue, status } = useAutosave<Record<string, unknown>>(async (p, keepalive) => {
@@ -245,11 +247,13 @@ export function MonthFront({ data, settings, onSaved }: { data: MonthData; setti
   const setA = (key: string, value: unknown) => {
     const next = { ...answers, [key]: value };
     setAnswers(next);
+    cache({ answers: next });
     queue({ answers: next });
   };
   const setS = (key: string, col: keyof ScoreCell, value: string) => {
     const next = { ...score, [key]: { ...score[key], [col]: value } };
     setScore(next);
+    cache({ scorecard: next });
     queue({ scorecard: next });
   };
 
@@ -273,13 +277,13 @@ export function MonthFront({ data, settings, onSaved }: { data: MonthData; setti
 
   return (
     <Paper
-      kicker="Groundwork · Monthly review · last Sunday, 60 min"
+      kicker={`Groundwork · ${data.month.slice(0, 4)} · monthly review · last Sunday, 60 min`}
       title={monthName(data.month)}
       meta={<div>{s.loggedDays} pages written this month</div>}
-      footRight={<SaveBadge status={status} />}
+      status={<SaveBadge status={status} />}
     >
       <Section title="Counted from your pages" />
-      <div className="grid grid-cols-2 gap-2 sm:grid-cols-4 md:grid-cols-6">
+      <div className="grid grid-cols-6 gap-2">
         <Stat label="Floor days" value={s.floorDays} />
         <Stat label="Study hours" value={hours(s.studyMinutes)} />
         <Stat label="Solved solo" value={s.soloSolved} />
@@ -307,7 +311,7 @@ export function MonthFront({ data, settings, onSaved }: { data: MonthData; setti
               <td className="k">{r.label}</td>
               {(['start', 'end', 'target'] as const).map((col) => (
                 <td key={col}>
-                  <input className="hand-input" value={score[r.key]?.[col] ?? ''} onChange={(e) => setS(r.key, col, e.target.value)} />
+                  <HandInput value={score[r.key]?.[col] ?? ''} onChange={(v) => setS(r.key, col, v)} />
                 </td>
               ))}
             </tr>
@@ -316,8 +320,8 @@ export function MonthFront({ data, settings, onSaved }: { data: MonthData; setti
       </table>
 
       <Section title="Habit grid" hint="● = done that day, from your daily pages" />
-      <div className="overflow-x-auto">
-        <table className="grid-table min-w-[720px]">
+      <div>
+        <table className="grid-table">
           <thead>
             <tr>
               <th>Habit</th>
@@ -353,14 +357,14 @@ export function MonthFront({ data, settings, onSaved }: { data: MonthData; setti
         </table>
       </div>
 
-      <div className="grid gap-5 md:grid-cols-2">
+      <div className="grid grid-cols-2 gap-5">
         <div>
           <Section title="Biggest lesson this month" />
-          <Area rows={4} value={str(answers.lesson)} onChange={(v) => setA('lesson', v)} />
+          <Area rows={3} value={str(answers.lesson)} onChange={(v) => setA('lesson', v)} />
         </div>
         <div>
-          <Section title="System changes" hint="what changes next month (one or two)" />
-          <Area rows={4} value={str(answers.systemEdits)} onChange={(v) => setA('systemEdits', v)} />
+          <Section title="System changes" hint="one or two" />
+          <Area rows={3} value={str(answers.systemEdits)} onChange={(v) => setA('systemEdits', v)} />
         </div>
       </div>
     </Paper>
@@ -369,6 +373,7 @@ export function MonthFront({ data, settings, onSaved }: { data: MonthData; setti
 
 // ------------------------------------------------------------------ YEAR
 export function YearFront({ data, settings, onSaved }: { data: YearData; settings: Settings; onSaved: () => void }) {
+  const qc = useQueryClient();
   const [answers, setAnswers] = useState<Record<string, unknown>>(data.answers);
   const { queue, status } = useAutosave<Record<string, unknown>>(async (p, keepalive) => {
     await put(`/reviews/year/${data.year}`, p, keepalive);
@@ -377,6 +382,7 @@ export function YearFront({ data, settings, onSaved }: { data: YearData; setting
   const setA = (key: string, value: unknown) => {
     const next = { ...answers, [key]: value };
     setAnswers(next);
+    qc.setQueryData<YearData>(['year', data.year], (d) => (d ? { ...d, answers: next } : d));
     queue({ answers: next });
   };
   const s = data.stats;
@@ -386,10 +392,10 @@ export function YearFront({ data, settings, onSaved }: { data: YearData; setting
       kicker="Groundwork · Yearly review · the last page of the book"
       title={`The year ${data.year}`}
       meta={<div>{s.loggedDays} pages written</div>}
-      footRight={<SaveBadge status={status} />}
+      status={<SaveBadge status={status} />}
     >
       <Section title="The year, counted" />
-      <div className="grid grid-cols-2 gap-2 sm:grid-cols-4 md:grid-cols-6">
+      <div className="grid grid-cols-6 gap-2">
         <Stat label="Floor days" value={s.floorDays} />
         <Stat label="Study hours" value={hours(s.studyMinutes)} />
         <Stat label="Solved solo" value={s.soloSolved} />
@@ -399,8 +405,8 @@ export function YearFront({ data, settings, onSaved }: { data: YearData; setting
       </div>
 
       <Section title="Month by month" />
-      <div className="overflow-x-auto">
-        <table className="p-table min-w-[600px]">
+      <div>
+        <table className="p-table compact">
           <thead>
             <tr>
               <th>Month</th>
@@ -428,22 +434,22 @@ export function YearFront({ data, settings, onSaved }: { data: YearData; setting
         </table>
       </div>
 
-      <div className="grid gap-5 md:grid-cols-2">
+      <div className="grid grid-cols-2 gap-x-5 gap-y-2">
         <div>
           <Section title="What I'm proud of" />
-          <Area rows={4} value={str(answers.proud)} onChange={(v) => setA('proud', v)} />
+          <Area rows={3} value={str(answers.proud)} onChange={(v) => setA('proud', v)} />
         </div>
         <div>
           <Section title="Hardest lessons" />
-          <Area rows={4} value={str(answers.lessons)} onChange={(v) => setA('lessons', v)} />
+          <Area rows={3} value={str(answers.lessons)} onChange={(v) => setA('lessons', v)} />
         </div>
         <div>
           <Section title="Next year's focus" hint="one sentence per area" />
-          <Area rows={4} value={str(answers.nextYear)} onChange={(v) => setA('nextYear', v)} />
+          <Area rows={3} value={str(answers.nextYear)} onChange={(v) => setA('nextYear', v)} />
         </div>
         <div>
           <Section title="Letter to next year's me" />
-          <Area rows={4} value={str(answers.letter)} onChange={(v) => setA('letter', v)} />
+          <Area rows={3} value={str(answers.letter)} onChange={(v) => setA('letter', v)} />
         </div>
       </div>
     </Paper>

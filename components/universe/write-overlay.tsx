@@ -2,79 +2,124 @@
 
 import { useCallback, useEffect, useState } from 'react';
 import { useQueryClient } from '@tanstack/react-query';
-import { ChevronLeft, ChevronRight, Orbit, RotateCw } from 'lucide-react';
+import { CalendarDays, ChevronLeft, ChevronRight, RotateCw, X } from 'lucide-react';
 import clsx from 'clsx';
-import { bookPages, pageId, parsePageId } from '@/lib/book';
+import { bookPages, pageId, sheetIndex } from '@/lib/book';
+import { todayIso } from '@/lib/dates';
 import { useSettings } from '@/lib/hooks';
 import { exitWrite, useU } from '@/lib/universe';
-import { PageFaces, describe } from '@/components/book/book-view';
+import { describe } from '@/components/book/book-view';
+import { NotebookStage, useNotebook } from '@/components/book/notebook';
+import { BookmarkList, RibbonSwatch, useBookmarks } from '@/components/book/bookmarks';
 
-/** Write mode: the page you flew into, as editable paper (2D), with the 3D page-turn kept. */
+/** An open journal: the real notebook, laid in front of you over the dimmed universe. */
 export function WriteOverlay() {
-  const qc = useQueryClient();
   const target = useU((s) => s.write);
+  if (!target) return null;
+  return <OpenJournal year={target.year} startId={target.pageId} startSide={target.side} />;
+}
+
+function OpenJournal({ year, startId, startSide }: { year: number; startId: string; startSide: 'front' | 'back' }) {
+  const qc = useQueryClient();
   const overlay = useU((s) => s.overlay);
   const { data: settings } = useSettings();
-  const [pid, setPid] = useState(target?.pageId ?? '');
-  const [side, setSide] = useState<'front' | 'back'>(target?.side ?? 'front');
-  const year = target?.year ?? new Date().getFullYear();
+  const [toolsEl, setToolsEl] = useState<HTMLDivElement | null>(null);
+  const [marksOpen, setMarksOpen] = useState(false);
+  const bm = useBookmarks(year);
+  const nb = useNotebook(year, { index: Math.max(0, sheetIndex(year, startId)), side: startSide }, { onMove: (c) => bm.remember(pageId(bookPages(year)[c.index])) });
+  const { cursor, turn, goTo } = nb;
+  const ref = bookPages(year)[cursor.index];
+  const currentId = pageId(ref);
+  const marked = bm.marks.includes(currentId);
 
   const onSaved = useCallback(() => {
     void qc.invalidateQueries({ queryKey: ['book', year] });
   }, [qc, year]);
 
-  const back = useCallback(() => {
-    // refresh everything the 3D pages are photographed from
-    for (const key of ['day', 'week', 'month', 'year', 'universe-year', 'books']) void qc.invalidateQueries({ queryKey: [key] });
-    exitWrite(pid);
-  }, [qc, year, pid]);
+  const close = useCallback(() => {
+    // the 3D book's cover shows how many pages are written
+    void qc.invalidateQueries({ queryKey: ['books'] });
+    exitWrite(currentId);
+  }, [qc, currentId]);
 
-  const sheets = bookPages(year);
-  const idx = sheets.findIndex((p) => pageId(p) === pid);
-  const go = (d: 1 | -1) => {
-    const next = sheets[idx + d];
-    if (next) {
-      setPid(pageId(next));
-      setSide('front');
-      window.scrollTo({ top: 0, behavior: 'smooth' });
-    }
+  const pick = (id: string) => {
+    const i = sheetIndex(year, id);
+    if (i >= 0) goTo({ index: i, side: 'front' });
   };
+  const today = todayIso();
 
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
-      if (e.key === 'Escape') back();
+      const t = e.target as HTMLElement;
+      const typing = !!t.closest('input, textarea, select, [contenteditable="true"]');
+      if (e.key === 'Escape') {
+        if (typing) t.blur();
+        else if (marksOpen) setMarksOpen(false);
+        else close();
+        return;
+      }
+      if (typing || e.altKey || e.ctrlKey || e.metaKey) return;
+      if (e.key === 'ArrowLeft') turn(-1);
+      else if (e.key === 'ArrowRight') turn(1);
+      else if (e.key.toLowerCase() === 'b') bm.toggle(currentId);
+      else return;
+      e.preventDefault();
     };
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
-  }, [back]);
-
-  const ref = parsePageId(pid, year);
-  if (!target || !ref) return null;
+  }, [close, turn, bm, currentId, marksOpen]);
 
   return (
     <div className={clsx('write-overlay absolute inset-0 z-20 overflow-y-auto', overlay === 'out' ? 'write-out' : 'write-in')}>
-      <div className="sticky top-0 z-10 border-b border-cyan-300/10 bg-[#05070d]/80 backdrop-blur">
-        <div className="mx-auto flex max-w-[940px] items-center gap-2 px-3 py-2 text-[13px] text-cyan-100">
-          <button onClick={back} className="hud-btn" title="Back to the 3D book (Esc)">
-            <Orbit size={14} /> 3D VIEW
+      <div className="sticky top-0 z-10 border-b border-white/[0.06] bg-[#05070d]/75 backdrop-blur">
+        <div className="relative mx-auto flex max-w-[940px] items-center gap-2 px-3 py-2 text-[13px] text-[#e9eef6]">
+          <button onClick={close} className="hud-btn" title="Close the book (Esc)">
+            <X size={14} /> CLOSE
           </button>
-          <button className="hud-icon" onClick={() => go(-1)} title="Previous page">
+          <button className="hud-icon" onClick={() => turn(-1)} title="Previous page (←)" aria-label="Previous page">
             <ChevronLeft size={18} />
           </button>
-          <div className="min-w-0 flex-1 truncate text-center font-semibold tracking-wide">
-            {describe(ref)} <span className="opacity-50">· {side === 'front' ? 'front' : 'notes'}</span>
+          <div className="min-w-0 flex-1 truncate text-center tracking-wide">
+            <span className="font-semibold">{describe(ref)}</span>
+            <span className="opacity-55">
+              {' '}
+              · {cursor.side === 'front' ? 'front' : 'notes'} · page {nb.pageNo} of {nb.pageTotal}
+            </span>
           </div>
-          <button className="hud-icon" onClick={() => go(1)} title="Next page">
+          <button className="hud-icon" onClick={() => turn(1)} title="Next page (→)" aria-label="Next page">
             <ChevronRight size={18} />
           </button>
-          <button className="hud-btn" onClick={() => setSide((s) => (s === 'front' ? 'back' : 'front'))} title="Turn the page over">
-            <RotateCw size={14} /> {side === 'front' ? 'NOTES' : 'FRONT'}
+          <button className="hud-btn" onClick={() => goTo({ index: cursor.index, side: cursor.side === 'front' ? 'back' : 'front' })} title="Turn to the other side of this sheet">
+            <RotateCw size={14} /> {cursor.side === 'front' ? 'NOTES' : 'FRONT'}
           </button>
+          <button className={clsx('hud-icon', marked && 'on')} onClick={() => bm.toggle(currentId)} title={marked ? 'Take the ribbon out (B)' : 'Lay a ribbon in this page (B)'} aria-pressed={marked}>
+            <RibbonSwatch size={16} on={marked} />
+          </button>
+          <button className="hud-icon text-[12px]" onClick={() => setMarksOpen((o) => !o)} title="Your bookmarks">
+            {bm.marks.length}
+          </button>
+          {today.startsWith(String(year)) && (
+            <button className="hud-icon" onClick={() => pick(`d-${today}`)} title="Today's page">
+              <CalendarDays size={16} />
+            </button>
+          )}
+          {marksOpen && (
+            <BookmarkList
+              className="right-3 top-12"
+              year={year}
+              marks={bm.marks}
+              onPick={(id) => {
+                setMarksOpen(false);
+                pick(id);
+              }}
+              onRemove={(id) => bm.toggle(id)}
+              onClose={() => setMarksOpen(false)}
+            />
+          )}
         </div>
       </div>
-      <div className="mx-auto max-w-[900px] px-3 py-5">
-        {settings ? <PageFaces key={pid} pageRef={ref} side={side} settings={settings} onSaved={onSaved} /> : null}
-      </div>
+      <div ref={setToolsEl} className="nb-tools mx-auto max-w-[900px] px-3 pt-2" style={{ top: 52 }} />
+      {settings ? <NotebookStage nb={nb} settings={settings} onSaved={onSaved} toolbarEl={toolsEl} marked={marked} /> : null}
     </div>
   );
 }

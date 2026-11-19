@@ -7,11 +7,10 @@ import { useQuery, useQueryClient } from '@tanstack/react-query';
 import clsx from 'clsx';
 import { api, put } from '@/lib/api';
 import { useSettings } from '@/lib/hooks';
-import { HAND_FONTS } from '@/lib/fonts';
 import { todayIso } from '@/lib/dates';
 import { bodyForScreen, loadBookFonts, typeset, type LibVolume, type LibVolumeInfo } from '@/lib/library';
 import { bindReadingQueryClient, rememberPlace, toggleBookmark } from '@/lib/reading';
-import type { DailyLog, DayData, Settings } from '@/lib/types';
+import type { DayData, Settings } from '@/lib/types';
 import {
   LIBRARY_DIMS,
   clearFocus,
@@ -19,7 +18,6 @@ import {
   enterWrite,
   focusBook,
   focusedBook,
-  invalidateSnaps,
   journalBook,
   journalId,
   labelEls,
@@ -42,7 +40,6 @@ import {
 } from '@/lib/universe';
 import { Hud } from './hud';
 import { WriteOverlay } from './write-overlay';
-import { Snapshotter } from './page-snapshots';
 import { ReadingSurface } from './reading-surface';
 
 const Scene = dynamic(() => import('./scene'), {
@@ -121,14 +118,7 @@ export function Universe() {
   const journals = useQuery({ queryKey: ['books'], queryFn: () => api<JournalInfo[]>('/books') });
   const library = useQuery({ queryKey: ['library'], queryFn: () => api<LibVolumeInfo[]>('/library') });
   const { data: settings } = useSettings();
-  const status = useQuery({ queryKey: ['auth-status'], queryFn: () => api<{ username: string | null }>('/auth/status') });
   const today = useQuery({ queryKey: ['day', todayIso()], queryFn: () => api<DayData>(`/today?date=${todayIso()}`) });
-  const focusYear = focus?.startsWith('j-') ? Number(focus.slice(2)) : null;
-  const yearLogs = useQuery({
-    queryKey: ['universe-year', focusYear],
-    enabled: focusYear !== null,
-    queryFn: () => api<DailyLog[]>(`/logs?from=${focusYear}-01-01&to=${focusYear}-12-31`),
-  });
 
   const flash = useCallback(
     (message: string) => {
@@ -168,33 +158,8 @@ export function Universe() {
   }, [journals.data, library.data, set]);
 
   useEffect(() => {
-    if (status.data?.username) set({ username: status.data.username });
-  }, [status.data, set]);
-
-  useEffect(() => {
     if (settings?.reading) set({ reading: settings.reading });
   }, [settings?.reading, set]);
-
-  // handwriting font for the 3D journal pages: wait until the browser has it before drawing textures
-  useEffect(() => {
-    if (!settings) return;
-    const f = HAND_FONTS.find((x) => x.name === settings.font) ?? HAND_FONTS[0];
-    set({ font: f.name, fontScale: f.scale, startDate: settings.startDate, codeA: settings.codeA, codeB: settings.codeB, fontReady: false });
-    let alive = true;
-    document.fonts
-      .load(`48px "${f.name}"`)
-      .catch(() => undefined)
-      .then(() => alive && set({ fontReady: true }));
-    return () => {
-      alive = false;
-    };
-  }, [settings, set]);
-
-  useEffect(() => {
-    if (focusYear === null || !yearLogs.data) return;
-    set({ logs: Object.fromEntries(yearLogs.data.map((l) => [l.date, l])), logsYear: focusYear });
-    invalidateSnaps(); // page data changed → retake the page photos
-  }, [yearLogs.data, focusYear, set]);
 
   // library books: fetch the Markdown when selected, typeset it at a size that reads well on this
   // screen, and re-typeset (keeping your place) when the window or text size changes
@@ -352,7 +317,6 @@ export function Universe() {
       )}
       {opening && <div className="gw-toast">Typesetting…</div>}
       {overlay && <WriteOverlay />}
-      <Snapshotter />
       {journals.isError && (
         <div className="absolute inset-0 grid place-items-center text-[#dfe8f2]">
           <div className="gw-glass p-5 text-center">

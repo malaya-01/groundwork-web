@@ -43,6 +43,20 @@ export function parsePageId(id: string, year: number): PageRef | null {
   return bookPages(year).some((p) => pageId(p) === id) ? ref : null;
 }
 
+export type Side = 'front' | 'back';
+
+/** Where a page id sits in its year's book (-1 if it isn't there). */
+export function sheetIndex(year: number, id: string): number {
+  return bookPages(year).findIndex((p) => pageId(p) === id);
+}
+
+/**
+ * The printed page number. Every sheet has two sides, numbered like a real notebook:
+ * the front is the right-hand (odd) page, the back the left-hand (even) page.
+ */
+export const pageNumber = (index: number, side: Side) => 2 * index + (side === 'back' ? 2 : 1);
+export const pageCount = (year: number) => 2 * bookPages(year).length;
+
 /** Which year's book a date's page lives in, and its id. */
 export const dayHref = (date: string) => `/book/${date.slice(0, 4)}/d-${date}`;
 export const todayHref = () => dayHref(isoOf(new Date()));

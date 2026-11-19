@@ -29,7 +29,7 @@ import {
   ZoomOut,
 } from 'lucide-react';
 import clsx from 'clsx';
-import { bookPages, pageId } from '@/lib/book';
+import { bookPages, pageId, pageNumber, sheetIndex } from '@/lib/book';
 import { longDate, shortDate, todayIso } from '@/lib/dates';
 import { pageOfLoc, parseLoc } from '@/lib/library';
 import { markOnSpread, removeBookmark, toggleBookmark } from '@/lib/reading';
@@ -62,6 +62,11 @@ import { onThumbs, thumbs, thumbVersion } from './book-art';
 import { cameraCmd } from './scene';
 
 const pad2 = (n: number) => String(n).padStart(2, '0');
+/** Today's page number in this year's book (pages are dated and numbered, not day-counted). */
+const todayPage = () => {
+  const t = todayIso();
+  return pageNumber(Math.max(0, sheetIndex(Number(t.slice(0, 4)), `d-${t}`)), 'front');
+};
 
 export function Hud({ onSearch, today }: { onSearch: (q: string) => void; today: DayData | undefined }) {
   const mode = useU((s) => s.mode);
@@ -105,7 +110,7 @@ function StatusCard({ today }: { today: DayData | undefined }) {
       <div className="gw-date">{now ? longDate(todayIso()) : ' '}</div>
       {today && (
         <div className="gw-stats">
-          <Stat k="Day" v={today.dayNumber ? pad2(today.dayNumber) : '—'} />
+          <Stat k="Page" v={String(todayPage())} />
           <Stat k="Streak" v={String(today.streak)} />
           <div className="gw-stat">
             <div className="gw-stat-k">Floor</div>
