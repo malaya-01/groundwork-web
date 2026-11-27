@@ -1,6 +1,6 @@
 // State + geometry for the 3D universe.
 //
-// Two kinds of book orbit the star:
+// Two kinds of book orbit the Codex (the encyclopedia at the centre, see lib/codex.ts):
 //   journal  – a year of Groundwork pages: opening one lays the real notebook in front of you
 //   library  – a volume of a Markdown novel (read-only: never editable; double-click / Enter zooms)
 import { create } from 'zustand';
@@ -20,6 +20,8 @@ export interface UBook {
   kind: BookKind;
   /** journal year */
   year?: number;
+  /** journal numbers (pages written, floor days, notes) */
+  journal?: JournalInfo;
   /** library volume (metadata only; the text arrives when the book is opened) */
   vol?: LibVolumeInfo;
   /** big label: the year, or the volume title */
@@ -120,6 +122,10 @@ interface UState {
   quality: Quality;
   /** reading text size on screen, CSS px */
   readFont: number;
+  /** the Codex (the book at the centre) is open: 'in' while showing, 'out' while it closes */
+  codex: 'in' | 'out' | null;
+  /** the Codex spread on show (0 = title + contents) */
+  codexSpread: number;
   set: (p: Partial<UState>) => void;
 }
 export interface WriteTarget {
@@ -150,8 +156,31 @@ export const useU = create<UState>((set) => ({
   preview: false,
   quality: 'high',
   readFont: 18,
+  codex: null,
+  codexSpread: 0,
   set: (p) => set(p),
 }));
+
+// ------------------------------------------------------------------ the Codex (the book at the centre)
+let codexTimer: ReturnType<typeof setTimeout> | undefined;
+
+/** Opens the Codex: the encyclopedia of every book in orbit. Only from free flight. */
+export function openCodex(spread?: number) {
+  const s = get();
+  if (s.mode !== 'orbit' || s.codex === 'in') return;
+  clearTimeout(codexTimer);
+  s.set({ codex: 'in', hover: null, ...(spread !== undefined ? { codexSpread: spread } : {}) });
+}
+
+export function closeCodex(then?: () => void) {
+  if (!get().codex) return;
+  clearTimeout(codexTimer);
+  get().set({ codex: 'out' });
+  codexTimer = setTimeout(() => {
+    get().set({ codex: null });
+    then?.();
+  }, 420);
+}
 
 /** Orbit time, advanced every frame (not React state: changes 60×/s). */
 export const clock = { t: 0 };
@@ -451,6 +480,7 @@ export function journalBook(j: JournalInfo): UBook {
     id: journalId(j.year),
     kind: 'journal',
     year: j.year,
+    journal: j,
     title: String(j.year),
     series: 'Groundwork',
     accent: '#c9a45c',
@@ -533,7 +563,7 @@ export function orbitAngle(o: Orbit, t: number) {
   return o.phase + t * o.speed;
 }
 
-/** Where the "observation deck" is: beyond the outermost orbit, facing the star. */
+/** Where the "observation deck" is: beyond the outermost orbit, facing the Codex. */
 export function deckZ(count: number) {
   return ORBIT_BASE + Math.max(0, count - 1) * ORBIT_GAP + 14;
 }

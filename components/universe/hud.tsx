@@ -42,6 +42,7 @@ import {
   jumpToLocation,
   jumpToSheet,
   openBook,
+  openCodex,
   resetView,
   setZoom,
   sheetCount,
@@ -74,9 +75,10 @@ export function Hud({ onSearch, today }: { onSearch: (q: string) => void; today:
   const books = useU((s) => s.books);
   const message = useU((s) => s.message);
   const overlay = useU((s) => s.overlay);
+  const codex = useU((s) => s.codex);
   const book = books.find((b) => b.id === focus);
 
-  if (overlay) return null;
+  if (overlay || codex) return null;
   const reading = mode === 'open';
 
   return (
@@ -90,7 +92,7 @@ export function Hud({ onSearch, today }: { onSearch: (q: string) => void; today:
       {reading && book && <ReadingRail book={book} />}
       {reading && book && <Scrubber book={book} />}
       {message && <div className="gw-toast">{message}</div>}
-      {mode === 'orbit' && <div className="gw-hint">Drag to orbit · scroll to zoom · select a book or search your library</div>}
+      {mode === 'orbit' && <div className="gw-hint">Drag to orbit · scroll to zoom · select a book, or the Codex at the centre to read about them all</div>}
     </div>
   );
 }
@@ -303,7 +305,7 @@ function LibrarySummary() {
   const series = new Set(books.filter((b) => b.kind === 'library').map((b) => b.series)).size;
   const volumes = books.filter((b) => b.kind === 'library').length;
   return (
-    <div className="gw-glass gw-summary absolute bottom-5 left-5 hidden md:block">
+    <div className="gw-glass gw-summary pointer-events-auto absolute bottom-5 left-5 hidden md:block">
       <div className="gw-kicker">Your universe</div>
       <div className="gw-summary-row">
         <div>
@@ -319,6 +321,9 @@ function LibrarySummary() {
           <span>{series === 1 ? 'series' : 'series'}</span>
         </div>
       </div>
+      <button className="gw-btn mt-3 w-full" onClick={() => openCodex(0)} title="The encyclopedia of every book in orbit">
+        <BookOpen size={15} /> Read the Codex
+      </button>
     </div>
   );
 }
@@ -326,7 +331,7 @@ function LibrarySummary() {
 // ------------------------------------------------------------------ selected book
 
 /** Reading progress 0..1 for a library book (null = not started). */
-function progressOf(b: UBook, last: string | undefined): number | null {
+export function progressOf(b: UBook, last: string | undefined): number | null {
   if (b.kind !== 'library' || !last) return null;
   const ts = typesets.get(b.id);
   if (ts) return Math.min(1, (pageOfLoc(ts, last) + 1) / ts.pages.length);

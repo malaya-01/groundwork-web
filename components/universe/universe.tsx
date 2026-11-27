@@ -41,6 +41,7 @@ import {
 import { Hud } from './hud';
 import { WriteOverlay } from './write-overlay';
 import { ReadingSurface } from './reading-surface';
+import { CodexOverlay } from './codex-book';
 
 const Scene = dynamic(() => import('./scene'), {
   ssr: false,
@@ -88,6 +89,7 @@ export function Universe() {
   const focus = useU((s) => s.focus);
   const opening = useU((s) => s.opening);
   const overlay = useU((s) => s.overlay);
+  const codex = useU((s) => s.codex);
   const focusMode = useU((s) => s.focusMode);
   const readFont = useU((s) => s.readFont);
   const pendingFocus = useRef<string | null>(null);
@@ -225,7 +227,7 @@ export function Universe() {
         if (year < 2000 || year > 2200) return flash('ENTER A YEAR BETWEEN 2000 AND 2200');
         const id = journalId(year);
         if (books.some((b) => b.id === id)) return focusBook(id);
-        // a new journal is forged at the star and flies out to its own orbit, then to you
+        // a new journal is forged at the Codex and flies out to its own orbit, then to you
         const current = (settings as Settings | undefined)?.books ?? [];
         try {
           await put('/settings', { books: [...current, year] });
@@ -254,7 +256,7 @@ export function Universe() {
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       const s = useU.getState();
-      if (s.overlay) return; // the write overlay handles its own keys
+      if (s.overlay || s.codex) return; // the write overlay and the Codex handle their own keys
       const t = e.target as HTMLElement;
       if (t.closest('input, textarea, select, [contenteditable="true"]')) {
         if (e.key === 'Escape') (t as HTMLElement).blur();
@@ -304,7 +306,7 @@ export function Universe() {
 
   return (
     <div className="gw-universe fixed inset-0 overflow-hidden bg-[#070b18]">
-      <div className={clsx('absolute inset-0 transition-[filter,transform] duration-700', overlay && 'scale-[1.04] blur-[6px] brightness-[0.35]')}>
+      <div className={clsx('absolute inset-0 transition-[filter,transform] duration-700', (overlay || codex) && 'scale-[1.04] blur-[6px] brightness-[0.35]')}>
         <Scene />
         <OrbitLabels />
         <ReadingSurface />
@@ -317,6 +319,7 @@ export function Universe() {
       )}
       {opening && <div className="gw-toast">Typesetting…</div>}
       {overlay && <WriteOverlay />}
+      {codex && <CodexOverlay />}
       {journals.isError && (
         <div className="absolute inset-0 grid place-items-center text-[#dfe8f2]">
           <div className="gw-glass p-5 text-center">

@@ -37,7 +37,7 @@ import {
   type Orbit,
   type Quality,
 } from '@/lib/universe';
-import { Sun } from './sun';
+import { Codex } from './codex';
 import { Book3D, openPose, surf } from './book3d';
 import { glowTexture, gpu } from './textures';
 
@@ -122,7 +122,7 @@ function Sky({ quality }: { quality: Quality }) {
   return null;
 }
 
-/** Restrained post-processing: a soft bloom on true highlights (foil, the star) and a gentle vignette. */
+/** Restrained post-processing: a soft bloom on true highlights (foil, the heart of the Codex) and a gentle vignette. */
 function Effects({ quality }: { quality: Quality }) {
   return (
     <EffectComposer multisampling={quality === 'high' ? 4 : 0}>
@@ -149,7 +149,7 @@ function Universe() {
         <Stars radius={150} depth={70} count={quality === 'low' ? 400 : 900} factor={2.6} saturation={0.2} fade speed={0.5} />
         <Sparkles count={quality === 'low' ? 30 : 70} scale={[26, 9, 22]} position={[0, 2, deck - 2]} size={2.2} speed={0.18} opacity={0.5} color="#f2dcb0" />
       </HideWhileReading>
-      <Sun />
+      <Codex />
       <KeyLights deck={deck} />
       {showOrbits && orbits.map((o, i) => <OrbitRing key={sorted[i].id} orbit={o} id={sorted[i].id} />)}
       {sorted.map((b, i) => (
@@ -391,10 +391,16 @@ function CameraRig({ controls, deck }: { controls: React.RefObject<OrbitControls
   useEffect(
     () =>
       useU.subscribe((s, prev) => {
-        if (prev.mode === 'orbit' && s.mode !== 'orbit' && controls.current) {
+        // (mid-way back from the Codex, keep the place you were before it opened)
+        if (prev.mode === 'orbit' && s.mode !== 'orbit' && controls.current && !returning.current) {
           saved.current = { pos: camera.position.clone(), target: controls.current.target.clone() };
         }
         if (prev.mode !== 'orbit' && s.mode === 'orbit') returning.current = true;
+        // the Codex: lean in towards the book at the centre, and back out when it closes
+        if (!prev.codex && s.codex && s.mode === 'orbit' && controls.current) {
+          saved.current = { pos: camera.position.clone(), target: controls.current.target.clone() };
+        }
+        if (prev.codex && !s.codex && s.mode === 'orbit') returning.current = true;
       }),
     [camera, controls],
   );
@@ -469,6 +475,13 @@ function CameraRig({ controls, deck }: { controls: React.RefObject<OrbitControls
       g.pos.set(p.x + x, p.y, p.z + 1.75);
       g.target.set(p.x + x, p.y, p.z);
       smooth = 0.55;
+    } else if (s.codex) {
+      // a three-quarter view of the Codex from just above its pages, whichever side you were on
+      const from = saved.current?.pos ?? ORBIT_HOME;
+      const a = Math.atan2(from.x, from.z);
+      g.pos.set(Math.sin(a) * 10.5, 4.2, Math.cos(a) * 10.5);
+      g.target.set(0, 0.3, 0);
+      smooth = 0.9;
     } else if (returning.current && saved.current) {
       g.pos.copy(saved.current.pos);
       g.target.copy(saved.current.target);
@@ -479,7 +492,7 @@ function CameraRig({ controls, deck }: { controls: React.RefObject<OrbitControls
     }
 
     c.enabled = !active;
-    // idle: a slow drift around the star after 12 s without input
+    // idle: a slow drift around the Codex after 12 s without input
     c.autoRotate = !active && performance.now() - idle.current.last > 12000;
     c.autoRotateSpeed = 0.25;
     if (active) {

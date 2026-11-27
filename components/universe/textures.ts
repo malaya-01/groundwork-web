@@ -199,30 +199,7 @@ function shade(hex: string, k: number) {
   return `rgb(${r}, ${g}, ${b})`;
 }
 
-// ------------------------------------------------------------------ the star
-export function sunTexture(): CanvasTexture {
-  return cached('sun', 1024, 512, (ctx, w, h) => {
-    const g = ctx.createLinearGradient(0, 0, 0, h);
-    g.addColorStop(0, '#ffb347');
-    g.addColorStop(0.5, '#ffd27a');
-    g.addColorStop(1, '#ff9a2e');
-    ctx.fillStyle = g;
-    ctx.fillRect(0, 0, w, h);
-    const r = rng(7);
-    for (let i = 0; i < 2600; i++) {
-      const x = r() * w;
-      const y = r() * h;
-      const rad = 4 + r() * 22;
-      const gr = ctx.createRadialGradient(x, y, 0, x, y, rad);
-      const hot = r() > 0.45;
-      gr.addColorStop(0, hot ? 'rgba(255,248,210,0.55)' : 'rgba(200,70,10,0.35)');
-      gr.addColorStop(1, 'rgba(0,0,0,0)');
-      ctx.fillStyle = gr;
-      ctx.fillRect(x - rad, y - rad, rad * 2, rad * 2);
-    }
-  });
-}
-
+// ------------------------------------------------------------------ glow
 export function glowTexture(): CanvasTexture {
   return cached('glow', 256, 256, (ctx, w, h) => {
     const g = ctx.createRadialGradient(w / 2, h / 2, 0, w / 2, h / 2, w / 2);

@@ -38,7 +38,7 @@ export function pageQuery(ref: PageRef): { key: unknown[]; url: string } {
   return { key: ['year', ref.year], url: `/reviews/year/${ref.year}` };
 }
 
-function loadPage(qc: QueryClient, ref: PageRef | undefined) {
+export function loadPage(qc: QueryClient, ref: PageRef | undefined) {
   if (!ref) return Promise.resolve();
   const { key, url } = pageQuery(ref);
   return qc.ensureQueryData({ queryKey: key, queryFn: () => api<unknown>(url), staleTime: STALE });
@@ -297,8 +297,8 @@ function Leaf({ role, dir, onDone, children }: { role: 'page' | 'under' | 'leaf'
   );
 }
 
-/** The page itself at its real size, scaled into the stage. */
-function PageFrame({
+/** The page itself at its real size, scaled into the stage (read-only unless `active`). */
+export function PageFrame({
   year,
   c,
   active,

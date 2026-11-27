@@ -21,7 +21,8 @@ export function Shell({ children }: { children: React.ReactNode }) {
   const immersive = path.startsWith('/universe');
   const mode = useU((s) => s.mode);
   const focusMode = useU((s) => s.focusMode);
-  const hidden = immersive && (mode === 'open' || mode === 'write' || focusMode);
+  const codex = useU((s) => s.codex);
+  const hidden = immersive && (mode === 'open' || mode === 'write' || focusMode || !!codex);
 
   const nav = [
     { href: '/universe', match: '/universe', label: 'Universe', icon: Orbit },
